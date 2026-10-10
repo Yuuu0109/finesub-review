@@ -1,0 +1,45 @@
+name: finesub-review
+x-app: &app
+  image: finesub-review:0.1.0
+  build: .
+  restart: unless-stopped
+  environment:
+    DATABASE_URL: postgresql+psycopg://review:${POSTGRES_PASSWORD:?请在 .env 设置数据库密码}@db:5432/finesub_review
+    COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  depends_on:
+    db:
+      condition: service_healthy
+  security_opt:
+    - no-new-privileges:true
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: finesub_review
+      POSTGRES_USER: review
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 设置数据库密码}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U review -d finesub_review"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  app:
+    <<: *app
+    ports:
+      - "127.0.0.1:${REVIEW_PORT:-8766}:8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  worker:
+    <<: *app
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      app:
+        condition: service_healthy
+volumes:
+  postgres-data:
