@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { scopedDraftKey } from "../transport";
 import { computed, onMounted, ref, watch } from "vue";
 import { api, post, date, labels, type Detail, type RecordItem } from "../api";
 import { useApp } from "../context";
@@ -53,10 +54,10 @@ const latestDecision = computed(() =>
   detail.value?.decisions.find((d) => d.revision_id === detail.value?.entry.id),
 );
 const draftKey = computed(
-  () => `finesub-draft:${user.value?.id}:${detail.value?.entry.id}`,
+  () => scopedDraftKey(`finesub-draft:${user.value?.id}:${detail.value?.entry.id}`),
 );
 const editDraftKey = computed(
-  () => `finesub-edit:${user.value?.id}:${props.entryId}`,
+  () => scopedDraftKey(`finesub-edit:${user.value?.id}:${props.entryId}`),
 );
 const editStale = computed(() => editBaseRevision.value !== detail.value?.entry.id);
 let restoring = false;

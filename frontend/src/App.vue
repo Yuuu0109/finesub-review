@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, provide, ref } from "vue";
 import { api, post, setCsrf, type User, type Notice, date } from "./api";
+import { request } from "./transport";
 import Icon from "./components/Icon.vue";
 import Modal from "./components/Modal.vue";
 import Dashboard from "./pages/Dashboard.vue";
@@ -143,7 +144,7 @@ async function expired() {
   adminLoginOpen.value = false;
   password.value = "";
   try {
-    const result = await fetch("/api/auth/me", { credentials: "same-origin" });
+    const result = await request("/auth/me");
     if (!result.ok) throw new Error();
     const body = await result.json();
     user.value = body.user;

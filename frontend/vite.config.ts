@@ -5,5 +5,5 @@ import vue from "@vitejs/plugin-vue";
 const api = process.env.REVIEW_API ?? "http://127.0.0.1:8765";
 export default defineConfig({
   plugins: [vue()],
-  server: { port: 5173, proxy: { "/api": api } },
+  server: { port: 5173, strictPort: true, proxy: { "/api": api } },
 });

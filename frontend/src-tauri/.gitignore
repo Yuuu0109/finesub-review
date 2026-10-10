@@ -1,0 +1,5 @@
+/gen/schemas/
+/icons/*
+!/icons/source.svg
+!/icons/icon.ico
+!/icons/icon.png

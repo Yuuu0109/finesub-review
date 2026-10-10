@@ -5,6 +5,7 @@ import { useApp } from "../context";
 import Icon from "../components/Icon.vue";
 import Modal from "../components/Modal.vue";
 import Diff from "../components/Diff.vue";
+import DownloadLink from "../components/DownloadLink.vue";
 const props = defineProps<{ batchId?: string }>();
 const { user, go, toast, refresh } = useApp();
 const batches = ref<Batch[]>([]),
@@ -322,12 +323,13 @@ onUnmounted(() => clearInterval(timer));
         </div>
         <div v-if="active.assets?.length && admin" class="source-assets">
           <h3>原始上传文件</h3>
-          <a
+          <DownloadLink
             v-for="asset in active.assets"
             :key="asset.id"
-            :href="'/api/assets/' + asset.id + '/download'"
+            :path="'/assets/' + asset.id + '/download'"
+            :filename="asset.filename"
             >{{ asset.filename }}<Icon name="download" :size="15"
-          /></a></div
+          /></DownloadLink></div
       ></template>
       <div v-else class="empty-state import-empty">
         <Icon name="upload" :size="40" />

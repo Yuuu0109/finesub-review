@@ -4,6 +4,7 @@ import { api, post, date, labels, type Entry, type Release } from "../api";
 import { useApp } from "../context";
 import Icon from "../components/Icon.vue";
 import Modal from "../components/Modal.vue";
+import DownloadLink from "../components/DownloadLink.vue";
 const { user, go, toast, refresh } = useApp();
 const rows = ref<Release[]>([]),
   candidates = ref<Entry[]>([]),
@@ -184,14 +185,14 @@ onUnmounted(() => clearInterval(timer));
     </div>
     <div v-if="admin" class="release-actions">
       <template v-if="row.status === 'ready'"
-        ><a
+        ><DownloadLink
           class="button primary small"
-          :href="'/api/releases/' + row.id + '/download'"
-          ><Icon name="download" :size="15" />{{ row.report.native_import_requires_compat_tool ? '兼容知识库包' : '知识库包' }}</a
-        ><a
+          :path="'/releases/' + row.id + '/download'"
+          ><Icon name="download" :size="15" />{{ row.report.native_import_requires_compat_tool ? '兼容知识库包' : '知识库包' }}</DownloadLink
+        ><DownloadLink
           class="button small"
-          :href="'/api/releases/' + row.id + '/download?archive=true'"
-          >审核归档</a
+          :path="'/releases/' + row.id + '/download?archive=true'"
+          >审核归档</DownloadLink
         ><button
           v-if="!row.current"
           class="text-button"

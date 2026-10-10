@@ -1,0 +1,35 @@
+name: Windows desktop build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feat/desktop]
+    paths: ["frontend/**", ".github/workflows/desktop.yml"]
+  pull_request:
+    paths: ["frontend/**", ".github/workflows/desktop.yml"]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:desktop
+      - run: pnpm desktop:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finesub-review-windows
+          path: frontend/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

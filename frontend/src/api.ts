@@ -1,3 +1,4 @@
+import { request } from "./transport";
 export type User = {
   id: string;
   username: string;
@@ -102,20 +103,19 @@ export let csrf = "";
 export const setCsrf = (token: string) => {
   csrf = token;
 };
-export async function api<T = any>(
+export async function apiResponse(
   path: string,
   options: RequestInit = {},
-): Promise<T> {
+): Promise<Response> {
   const headers: Record<string, string> = {
     ...((options.headers as Record<string, string>) ?? {}),
   };
   if (options.body && !(options.body instanceof FormData))
     headers["Content-Type"] = "application/json";
   if (csrf) headers["X-CSRF-Token"] = csrf;
-  const result = await fetch("/api" + path, {
+  const result = await request(path, {
     ...options,
     headers,
-    credentials: "same-origin",
   });
   if (!result.ok) {
     const body = await result.json().catch(() => ({}));
@@ -137,7 +137,10 @@ export async function api<T = any>(
       window.dispatchEvent(new Event("session-expired"));
     throw new Error(detail);
   }
-  return result.json();
+  return result;
+}
+export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+  return (await apiResponse(path, options)).json();
 }
 export const post = <T = any>(path: string, data: unknown = {}) =>
   api<T>(path, { method: "POST", body: JSON.stringify(data) });
