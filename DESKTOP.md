@@ -33,7 +33,7 @@ pnpm desktop:build
 
 安装包输出到 `frontend/src-tauri/target/release/bundle/nsis/`。Node、Rust、C++ 工具仅用于开发和构建，最终用户不需要安装。安装程序会检查 WebView2，缺少时联网下载安装。0.2.0 提供签名校验更新，但没有 Windows Authenticode 证书签名，两种签名用途不同。
 
-仓库提供 `.github/workflows/desktop.yml`，推送相关分支或手动触发时在 Windows 上执行测试、构建和签名，安装包保存为 Actions artifact，不自动发布 Release。PR 只运行测试，不读取签名密钥。第一次 Rust 构建会生成 `Cargo.lock`，应保留它以固定完整依赖树。
+仓库提供 `.github/workflows/desktop.yml`，推送相关分支或手动触发时在 Windows 上执行测试、构建和签名，安装包保存为 Actions artifact，不自动发布 Release。PR 只运行测试，不读取签名密钥。仓库保留已验证的 `Cargo.lock`，CI 使用 `--locked` 检查完整依赖树。
 
 ## GitHub Releases 更新
 

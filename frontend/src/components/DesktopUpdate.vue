@@ -8,8 +8,8 @@ const error = ref(""), checked = ref(false), downloaded = ref(0), total = ref<nu
 const update = ref<{ version: string; notes: string } | null>(null);
 const percent = computed(() => total.value ? Math.min(100, Math.round(downloaded.value / total.value * 100)) : null);
 async function check(visible = true) {
-  if (checking.value || installing.value) return;
   if (visible) open.value = true;
+  if (checking.value || installing.value) return;
   checking.value = true;
   error.value = "";
   update.value = null;
