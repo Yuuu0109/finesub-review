@@ -1,6 +1,6 @@
 [package]
 name = "finesub-review-desktop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.90"
 description = "FineSub 知识库审核桌面客户端"
@@ -14,3 +14,6 @@ tauri-plugin-http = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+url = "2"

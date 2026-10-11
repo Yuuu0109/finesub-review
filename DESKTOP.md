@@ -31,9 +31,36 @@ pnpm desktop:dev
 pnpm desktop:build
 ```
 
-安装包输出到 `frontend/src-tauri/target/release/bundle/nsis/`。Node、Rust、C++ 工具仅用于开发和构建，最终用户不需要安装。安装程序会检查 WebView2，缺少时联网下载安装。首版没有代码签名和自动更新。
+安装包输出到 `frontend/src-tauri/target/release/bundle/nsis/`。Node、Rust、C++ 工具仅用于开发和构建，最终用户不需要安装。安装程序会检查 WebView2，缺少时联网下载安装。0.2.0 提供签名校验更新，但没有 Windows Authenticode 证书签名，两种签名用途不同。
 
-仓库提供 `.github/workflows/desktop.yml`，推送相关分支、创建 PR 或手动触发时在 Windows 上执行测试并构建，安装包保存为 Actions artifact，不自动发布 Release。第一次 Rust 构建会生成 `Cargo.lock`；验证成功后应将其纳入版本控制以固定完整依赖树。
+仓库提供 `.github/workflows/desktop.yml`，推送相关分支或手动触发时在 Windows 上执行测试、构建和签名，安装包保存为 Actions artifact，不自动发布 Release。PR 只运行测试，不读取签名密钥。第一次 Rust 构建会生成 `Cargo.lock`，应保留它以固定完整依赖树。
+
+## 0.2.0 更新服务部署
+
+更新源使用所连接审核服务器的 `/api/desktop/updates/latest.json`，必须为 HTTPS。同源下载地址及更新包签名均通过后才安装。成功连接后后台检查一次，也可点击“检查更新”；下载和安装始终需要用户点击确认。更新仅替换桌面程序，不迁移云端审核数据库。
+
+源码仓库保持私有，客户端没有 GitHub 令牌。更新接口公开的只有桌面安装包、版本和更新说明，不包含审核数据。暂未部署更新包时会明确提示检查失败，不冒充“已是最新版本”。
+
+在云服务器部署本分支的后端代码（`feat/desktop`），更新 `.env`：
+
+```dotenv
+REVIEW_PUBLIC_URL=https://你的审核域名
+COOKIE_SECURE=true
+```
+
+下载 GitHub Actions 的 `finesub-review-windows` artifact，解压到服务器临时目录。以下命令在项目根目录执行，将 `解压目录` 替换为实际路径：
+
+```bash
+python3 scripts/deploy_desktop_update.py --source 解压目录 --destination desktop-updates
+docker compose up -d --build
+curl --fail https://你的审核域名/api/desktop/updates/latest.json
+```
+
+使用已有 Caddy HTTPS 配置时，Compose 命令保留 `-f compose.yml -f compose.https.yml`。反向代理需允许更新接口和安装包下载。`desktop-updates` 以只读方式挂载到 API 容器。发布脚本检查 SHA-256，先放安装包，再原子替换版本清单，旧安装包保留以支持正在进行的下载。
+
+后续更新：同步提升 `frontend/package.json`、`frontend/src-tauri/Cargo.toml` 和 `tauri.conf.json` 的桌面版本，更新 `CHANGELOG.md`，推送构建。将新的 artifact 用同一命令部署到 `desktop-updates`，无需重启 API（首次增加接口需部署后端）。相同或更低版本不会提示升级。
+
+签名私钥保存在本机项目 `.secrets/desktop-updater.key`，另存于 GitHub Actions 的 `TAURI_SIGNING_PRIVATE_KEY` Secret；公钥已内置客户端。必须安全备份私钥，不能提交、随包分发或重新生成替换，否则已安装客户端无法信任后续更新。本机构建需要设置 `TAURI_SIGNING_PRIVATE_KEY` 为私钥文件绝对路径，`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 为空字符串；不可将签名变量写入可提交的 `.env`。
 
 ## 验收
 

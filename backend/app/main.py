@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, or_, select, text, update
 
 from . import compat
+from .desktop_updates import router as desktop_updates_router
 from .db import AccessGate, AccessSession, Asset, Audit, Batch, Decision, Entry, ImportItem, Job, LoginSession, Notice, Release, Review, Revision, User, Workspace, init_db, now
 from .security import access_session, admin, current_user, db_session, hash_password, token_hash, user_view, verify_password
 from .services import admins, audit, compatibility_baseline, confirm_batch, current_revisions, decide, new_revision, notify, prepare_release, require, revision_view, snapshot, workspace_lock
@@ -29,6 +30,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title='FineSub 知识库审核', version='0.1.0', lifespan=lifespan, docs_url=None, redoc_url=None)
+app.include_router(desktop_updates_router)
 
 
 @app.middleware('http')

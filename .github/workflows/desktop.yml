@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main, feat/desktop]
-    paths: ["frontend/**", ".github/workflows/desktop.yml"]
+    paths: ["frontend/**", "scripts/package_desktop.mjs", ".github/workflows/desktop.yml"]
   pull_request:
-    paths: ["frontend/**", ".github/workflows/desktop.yml"]
+    paths: ["frontend/**", "scripts/package_desktop.mjs", ".github/workflows/desktop.yml"]
 permissions:
   contents: read
 jobs:
@@ -25,11 +25,30 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:desktop
+      - run: pnpm build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: pnpm desktop:build
+        if: github.event_name != 'pull_request'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+      - run: node ../scripts/package_desktop.mjs
+        if: github.event_name != 'pull_request'
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: finesub-review-windows
-          path: frontend/src-tauri/target/release/bundle/nsis/*-setup.exe
+          path: output/desktop-*/
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: desktop-build-evidence
+          path: |
+            frontend/src-tauri/Cargo.lock
+            frontend/src-tauri/target/release/finesub-review-desktop.exe

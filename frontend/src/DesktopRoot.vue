@@ -4,6 +4,7 @@ import App from "./App.vue";
 import Icon from "./components/Icon.vue";
 import { probeServer, savedServer, selectServer } from "./transport";
 import { normalizeServer } from "./server";
+import DesktopUpdate from "./components/DesktopUpdate.vue";
 const address = ref(savedServer());
 const connected = ref(false), busy = ref(false), error = ref("");
 async function connect() {
@@ -31,6 +32,7 @@ onMounted(() => document.title = "FineSub 知识库审核");
   <div v-if="connected" class="desktop-connected">
     <div class="desktop-bar">
       <span>FineSub 知识库审核</span>
+      <DesktopUpdate :server="address" />
       <button type="button" @click="switchServer">{{ address }} · 更换服务器</button>
     </div>
     <App />
@@ -44,6 +46,7 @@ onMounted(() => document.title = "FineSub 知识库审核");
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>
         <button class="button primary full" :disabled="busy">{{ busy ? "正在连接…" : "连接" }}<Icon name="arrow" :size="18" /></button>
       </form>
+      <div class="desktop-update-entry"><DesktopUpdate :server="address" /></div>
     </section>
   </main>
 </template>
@@ -53,6 +56,7 @@ onMounted(() => document.title = "FineSub 知识库审核");
 .desktop-card h1 { margin: 36px 0 24px; }
 .desktop-card form { display: grid; gap: 20px; }
 .desktop-card .brand { justify-content: flex-start; }
+.desktop-update-entry { margin-top: 20px; text-align: right; }
 .desktop-bar { height: 40px; position: sticky; top: 0; z-index: 45; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--line-1); background: var(--surface-2); font-size: var(--text-xs); }
 .desktop-bar button { border: 0; background: transparent; color: var(--ink-3); max-width: 65%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desktop-connected .sidebar { top: 40px; }

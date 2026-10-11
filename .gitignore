@@ -14,3 +14,6 @@ import-packages/
 target/
 .env.*
 !.env.example
+.secrets/
+output/
+desktop-updates/
