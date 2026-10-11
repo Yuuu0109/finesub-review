@@ -72,4 +72,8 @@ gh release edit v0.2.0 --draft=false --latest
 
 2026-10-10 本地验证：前端类型检查/生产构建通过；桌面地址、API 路径、文件名与传输适配测试 4 项通过；后端访问权限和网页资源测试 10 项通过；Edge 无头浏览器完成连接、拒绝公网 HTTP、登录页、更换服务器、地址记忆和网页回退检查（模拟 IPC/API）。原生构建实际尝试因缺少 Cargo 失败，环境检查也缺少 MSVC；尚未生成安装包或完成真实云服务验收。
 
-实现依据：[HTTP 插件](https://v2.tauri.app/plugin/http-client/)、[文件对话框](https://v2.tauri.app/plugin/dialog/)、[文件系统权限](https://v2.tauri.app/plugin/file-system/)、[Windows 安装包](https://v2.tauri.app/distribute/windows-installer/)。
+2026-10-11 0.2.0 验证：GitHub Actions [38125821222](https://github.com/Yuuu0109/finesub-review/actions/runs/38125821222) 原生测试、Windows 构建和签名成功，构建提交为 `5fa1a7091da3c26e65da55e14f3f7f3f031e5ec9`。[正式 Release](https://github.com/Yuuu0109/finesub-review/releases/tag/v0.2.0) 已发布。安装包 4,288,892 字节；SHA-256 为 `070a2773706d0465ad4b6d5c162a6dc219470194c4444668851910621a056379`。
+
+本机验证了同次构建的原生程序启动、真实 Tauri 版本 IPC、访问公开 GitHub 更新源并显示“已是最新版本”。安装包签名和 SHA-256 校验通过，修改一个字节后签名验证失败；匿名下载的清单与安装包和本机产物一致。前端测试 4 项、后端回归 10 项通过，更新提示、确认下载、进度、错误重试及后台检查中打开窗口通过浏览器模拟 IPC 验证。尚未执行真实跨版本覆盖安装、卸载或云端业务验收。
+
+实现依据：[HTTP 插件](https://v2.tauri.app/plugin/http-client/)、[文件对话框](https://v2.tauri.app/plugin/dialog/)、[文件系统权限](https://v2.tauri.app/plugin/file-system/)、[Windows 安装包](https://v2.tauri.app/distribute/windows-installer/)、[更新插件](https://v2.tauri.app/plugin/updater/)、[GitHub 构建分发](https://v2.tauri.app/distribute/pipelines/github/)。
