@@ -62,6 +62,8 @@ gh release edit v0.2.1 --draft=false --latest
 
 ## 验收
 
+2026-10-12 免安装版 0.2.1：[构建 38156586017](https://github.com/Yuuu0109/finesub-review/actions/runs/38156586017) 原生测试、构建及独立 EXE 签名全部通过。[Release](https://github.com/Yuuu0109/finesub-review/releases/tag/v0.2.1) 已发布，`-portable.exe` 为 18,842,112 字节，SHA-256 为 `23a61b79216836ec9edf18b03dac210c7469dcb92b434d4862325a17b37f16d1`。本机直接启动交付 EXE，真实 IPC 返回 0.2.1；签名验证、篡改拒绝、匿名下载一致性检查通过。更新下载、错误重试与保存提示通过模拟 IPC 验证，原生测试确认不覆盖已有文件。本机原生 GitHub 检查遇到连接失败（公开清单与 EXE 手动下载正常）；尚未完成真实跨版本下载验收。
+
 - 网页构建与原有登录流程正常。
 - 桌面连接失败可重试，拒绝公网 HTTP 与非审核服务器。
 - 访问口令、管理员登录/退出、会话过期与重新进入正常。
