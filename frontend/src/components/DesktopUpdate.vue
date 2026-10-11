@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from "vue";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import Modal from "./Modal.vue";
-const props = defineProps<{ server: string }>();
 const version = ref(""), open = ref(false), checking = ref(false), installing = ref(false);
 const error = ref(""), checked = ref(false), downloaded = ref(0), total = ref<number | null>(null);
 const update = ref<{ version: string; notes: string } | null>(null);
@@ -16,8 +15,7 @@ async function check(visible = true) {
   update.value = null;
   checked.value = false;
   try {
-    if (!props.server.startsWith("https://")) throw new Error("请先连接 HTTPS 服务器，再检查更新。");
-    update.value = await invoke("check_desktop_update", { server: props.server });
+    update.value = await invoke("check_desktop_update");
     checked.value = true;
   } catch (e) { error.value = String(e instanceof Error ? e.message : e); }
   finally { checking.value = false; }
@@ -36,7 +34,7 @@ async function install() {
 }
 onMounted(async () => {
   version.value = await getVersion();
-  if (props.server.startsWith("https://")) void check(false);
+  void check(false);
 });
 </script>
 <template>

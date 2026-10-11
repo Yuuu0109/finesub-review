@@ -32,7 +32,7 @@ onMounted(() => document.title = "FineSub 知识库审核");
   <div v-if="connected" class="desktop-connected">
     <div class="desktop-bar">
       <span>FineSub 知识库审核</span>
-      <DesktopUpdate :server="address" />
+      <DesktopUpdate />
       <button type="button" @click="switchServer">{{ address }} · 更换服务器</button>
     </div>
     <App />
@@ -46,7 +46,7 @@ onMounted(() => document.title = "FineSub 知识库审核");
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>
         <button class="button primary full" :disabled="busy">{{ busy ? "正在连接…" : "连接" }}<Icon name="arrow" :size="18" /></button>
       </form>
-      <div class="desktop-update-entry"><DesktopUpdate :server="address" /></div>
+      <div class="desktop-update-entry"><DesktopUpdate /></div>
     </section>
   </main>
 </template>

@@ -10,5 +10,4 @@ backend/.pytest_cache
 .env
 .secrets
 output
-desktop-updates
 frontend/src-tauri/target
