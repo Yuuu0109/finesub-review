@@ -21,6 +21,8 @@
 
 ## Windows 开发与打包
 
+0.2.2 起使用美香主题图标。当前图标源文件为 `frontend/src-tauri/icons/mika-source.png`，使用 `pnpm tauri icon src-tauri/icons/mika-source.png`（在 frontend 目录）重新生成图标；原 `source.svg` 仅作为旧图标备份。
+
 需要 Node.js 22.12+、pnpm 11、Rust stable（至少 1.90）、Visual Studio C++ Build Tools 和 WebView2。按 [Tauri 官方 Windows 前置要求](https://v2.tauri.app/start/prerequisites/#windows) 安装工具链。
 
 在 `frontend` 目录运行：
