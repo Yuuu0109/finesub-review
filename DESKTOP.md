@@ -10,6 +10,8 @@
 
 ## 使用
 
+推荐下载 Release 中以 `-portable.exe` 结尾的文件，双击直接运行，不需要安装 FineSub。需要系统已具备 WebView2 Runtime；本机已有。设置与会话仍保存在系统应用数据目录，免安装不代表所有数据都随 EXE 移动。
+
 1. 启动客户端，填写服务器地址，如 `https://review.example.com`，点击“连接”。
 2. 输入原有访问口令。管理员继续通过现有管理员入口登录。
 3. 导入、裁决、发布仍由云端执行。下载会打开系统保存对话框。
@@ -37,23 +39,23 @@ pnpm desktop:build
 
 ## GitHub Releases 更新
 
-更新源固定为 `https://github.com/Yuuu0109/finesub-review/releases/latest/download/latest.json`。启动时后台检查一次，也可点击“检查更新”，无需先连接审核服务器；下载和安装需要用户点击确认。只接受本仓库 HTTPS Release 下载地址，并使用 Tauri 内置公钥验证签名。相同或更低版本不会提示升级。无法访问 GitHub 时可继续使用客户端并稍后重试。
+更新源固定为 `https://github.com/Yuuu0109/finesub-review/releases/latest/download/latest.json`。启动时后台检查一次，也可点击“检查更新”，无需先连接审核服务器；0.2.1 使用清单中的 `windows-x86_64-portable`，0.2.0 的安装包更新目标保持兼容。点击“下载新版”后验证签名并保存到系统“下载”目录，关闭当前程序后双击新版 EXE 即可，不运行安装器、不覆盖原文件。只接受本仓库 HTTPS Release 下载地址，并使用 Tauri 内置公钥验证签名。相同或更低版本不会提示升级。无法访问 GitHub 时可继续使用客户端并稍后重试。
 
-仓库及 Release 公开，客户端没有 GitHub 令牌。更新仅替换桌面程序，不迁移云端数据库，云服务器无需增加更新接口。
+仓库及 Release 公开，客户端没有 GitHub 令牌。更新仅下载新版桌面程序，不迁移云端数据库，云服务器无需增加更新接口。
 
 后续发布步骤：
 
 1. 同步提升 `frontend/package.json`、`frontend/src-tauri/Cargo.toml`、`frontend/src-tauri/tauri.conf.json` 的版本，更新 `CHANGELOG.md`。
-2. 推送到 `feat/desktop`，等待 Windows desktop build 成功，下载 `finesub-review-windows` artifact。构建自动生成安装包、`.sig`、`latest.json`、`SHA256SUMS.txt`。
-3. 在 GitHub 创建对应 `v版本号` Release，目标使用该次成功构建的提交，上传这四个文件。确认所有附件齐全后发布为正式最新版（非预发布）。不要覆盖已发布版本的安装包。
-4. 检查上述固定更新地址返回新版清单，并在上一版客户端执行检查、下载、安装与重启验收。
+2. 推送到 `feat/desktop`，等待 Windows desktop build 成功，下载 `finesub-review-windows` artifact。构建自动生成免安装 EXE、兼容旧版的安装包、两份 `.sig`、`latest.json` 和 `SHA256SUMS.txt`。
+3. 在 GitHub 创建对应 `v版本号` Release，目标使用该次成功构建的提交，上传全部六个文件。确认所有附件齐全后发布为正式最新版（非预发布）。不要覆盖已发布版本的安装包。
+4. 检查上述固定更新地址返回新版清单，并在上一版客户端执行检查、下载、签名验证与新版运行验收。
 
 也可用 GitHub CLI 发布，以下路径和版本需替换为本次实际值：
 
 ```powershell
-gh release create v0.2.0 --target 构建提交SHA --draft --title "FineSub Review 0.2.0" --notes-file 发布说明文件
-gh release upload v0.2.0 output/desktop-0.2.0/*
-gh release edit v0.2.0 --draft=false --latest
+gh release create v0.2.1 --target 构建提交SHA --draft --title "FineSub Review 0.2.1 免安装版" --notes-file 发布说明文件
+gh release upload v0.2.0 output/desktop-0.2.1/*
+gh release edit v0.2.1 --draft=false --latest
 ```
 
 签名私钥保存在本机项目 `.secrets/desktop-updater.key`，另存于 GitHub Actions 的 `TAURI_SIGNING_PRIVATE_KEY` Secret；公钥已内置客户端。必须安全备份私钥，不能提交、随包分发或重新生成替换，否则已安装客户端无法信任后续更新。本机构建需要设置 `TAURI_SIGNING_PRIVATE_KEY` 为私钥文件绝对路径，`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 为空字符串；不可将签名变量写入可提交的 `.env`。
