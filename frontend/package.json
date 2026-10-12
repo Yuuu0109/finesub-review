@@ -10,7 +10,7 @@
     "test:desktop": "node --experimental-strip-types --test tests/*.test.ts",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build --bundles nsis"
+    "desktop:build": "tauri build --no-bundle"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.2",
