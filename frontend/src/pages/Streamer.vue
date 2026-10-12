@@ -313,7 +313,7 @@ onMounted(load);
       <div class="profile-identity">
         <span class="profile-monogram">蜜</span>
         <div>
-          <div class="eyebrow">主播档案 · 数据源：知识库</div>
+          <div class="eyebrow">主播档案</div>
           <h1>{{ profile.entry.title }}</h1>
           <p class="profile-romaji">{{ basicName.join(" / ") }}</p>
           <p v-if="nodeFormat" class="profile-role">{{ pick(registry, "人设") }}</p>
@@ -360,7 +360,6 @@ onMounted(load);
       <div class="panel-heading">
         <div>
           <h2>节目「ひなたぼっこ。」</h2>
-          <p>问候语、固定环节与节目结构，均取自档案词条正文。</p>
         </div>
         <Icon name="message" :size="19" />
       </div>
@@ -412,8 +411,7 @@ onMounted(load);
         <section v-if="!nodeFormat" class="panel profile-block">
           <div class="panel-heading">
             <div>
-              <h2>年表</h2>
-              <p>{{ timeline.length }} 条重要经历，来自档案词条的「重要经历」章节。</p>
+              <h2>年表 <span class="count-chip">{{ timeline.length }}</span></h2>
             </div>
             <Icon name="clock" :size="19" />
           </div>
@@ -433,10 +431,7 @@ onMounted(load);
         <section class="panel profile-block">
           <div class="panel-heading">
             <div>
-              <h2>知识库词条</h2>
-              <p>
-                共 {{ entries.length }} 条与该节目相关的知识，点击进入审核页。
-              </p>
+              <h2>知识库词条 <span class="count-chip">{{ entries.length }}</span></h2>
             </div>
             <Icon name="book" :size="19" />
           </div>
@@ -510,7 +505,6 @@ onMounted(load);
           <div class="panel-heading">
             <div>
               <h2>人际关系</h2>
-              <p>工作人员、家人与共演者。</p>
             </div>
           </div>
           <div class="content-pad relation-groups">
@@ -537,7 +531,6 @@ onMounted(load);
           <div class="panel-heading">
             <div>
               <h2>联网核对补充</h2>
-              <p>已公开可查、档案尚未收录的信息。</p>
             </div>
           </div>
           <div class="content-pad">
@@ -570,9 +563,6 @@ onMounted(load);
                 {{ profile.entry.published ? "已进入当前发布" : "尚未发布" }}
               </dd>
             </dl>
-            <p class="small-text muted">
-              本页所有事实均从知识库词条正文解析而来，修订词条后本页会同步变化。
-            </p>
           </div>
         </section>
       </aside>

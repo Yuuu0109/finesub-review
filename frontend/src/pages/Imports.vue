@@ -132,9 +132,7 @@ onUnmounted(() => clearInterval(timer));
 <template>
   <div class="page-heading">
     <div>
-      <div class="eyebrow">导入中心</div>
-      <h1>把待核实的知识，带到一起。</h1>
-      <p>原始文件会保留。确认预检结果后，内容才会进入审核队列。</p>
+      <h1>导入批次</h1>
     </div>
     <button v-if="admin" class="button primary" @click="uploadOpen = true">
       <Icon name="upload" :size="18" />新建导入
@@ -398,7 +396,10 @@ onUnmounted(() => clearInterval(timer));
           <option value="streamer">主播档案</option>
           <option value="style">翻译风格</option>
           <option value="translation">翻译纠错</option></select
-        ><small>ZIP 和目录导入按文件原目录识别。当前 FineSub 请导入 rendered/ 投影。</small></label
+        ><small
+          >ZIP 和目录导入按文件原目录识别。当前 FineSub 请导入 rendered/
+          投影。</small
+        ></label
       ><label
         >来源与备注<textarea
           v-model="source"

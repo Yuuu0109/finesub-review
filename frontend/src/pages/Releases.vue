@@ -88,9 +88,7 @@ onUnmounted(() => clearInterval(timer));
 <template>
   <div class="page-heading">
     <div>
-      <div class="eyebrow">发布中心</div>
-      <h1>让审核通过的知识，进入正式版本。</h1>
-      <p>每次发布都会保留未变更的正式知识，并生成可追溯的完整知识库包。</p>
+      <h1>发布版本</h1>
     </div>
     <button class="button" @click="load">
       <Icon name="refresh" :size="17" />刷新
@@ -102,7 +100,6 @@ onUnmounted(() => clearInterval(timer));
         <h2>
           待发布变更 <span class="count-chip">{{ candidates.length }}</span>
         </h2>
-        <p>只有管理员已通过的最新版本可以加入本次发布。</p>
       </div>
       <button
         class="button primary"
@@ -141,7 +138,7 @@ onUnmounted(() => clearInterval(timer));
       </div>
     </div>
     <div v-else class="empty-small">
-      暂无新的已通过变更。管理员完成裁决后，内容会出现在这里。
+      暂无待发布变更
     </div>
   </section>
   <div class="section-heading">
@@ -151,7 +148,6 @@ onUnmounted(() => clearInterval(timer));
   <div v-if="!rows.length" class="panel empty-state">
     <Icon name="download" :size="36" />
     <h3>还没有发布版本</h3>
-    <p>首次发布将从已通过的知识开始建立正式版本。</p>
   </div>
   <article v-for="row in rows" :key="row.id" class="panel release-card">
     <div class="release-icon">
@@ -188,7 +184,11 @@ onUnmounted(() => clearInterval(timer));
         ><DownloadLink
           class="button primary small"
           :path="'/releases/' + row.id + '/download'"
-          ><Icon name="download" :size="15" />{{ row.report.native_import_requires_compat_tool ? '兼容知识库包' : '知识库包' }}</DownloadLink
+          ><Icon name="download" :size="15" />{{
+            row.report.native_import_requires_compat_tool
+              ? "兼容知识库包"
+              : "知识库包"
+          }}</DownloadLink
         ><DownloadLink
           class="button small"
           :path="'/releases/' + row.id + '/download?archive=true'"

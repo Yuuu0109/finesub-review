@@ -26,6 +26,8 @@ const paths: Record<string, string> = {
     "M20 7v5h-5 M4 17v-5h5 M5 7a8 8 0 0 1 14-2l1 2 M4 17l1 2a8 8 0 0 0 14-2",
   edit: "m16 3 5 5-12 12H4v-5z M13 6l5 5",
   menu: "M4 6h16 M4 12h16 M4 18h16",
+  link: "M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l2-2",
+  key: "M15 3a6 6 0 1 1-4.4 10.1L3 21v-4l3-3h3l1.9-1.9A6 6 0 0 1 15 3 M16 7h.01",
 };
 </script>
 <template>

@@ -57,7 +57,7 @@ onMounted(async () => {
       </template>
       <p v-else-if="checked">已是最新版本。</p>
       <template v-if="downloading">
-        <progress :value="percent ?? undefined" max="100"></progress>
+        <progress aria-label="新版下载进度" :value="percent ?? undefined" max="100"></progress>
         <p>{{ percent === 100 ? '正在校验并保存…' : `正在下载 ${percent === null ? (downloaded / 1048576).toFixed(1) + ' MB' : percent + '%'}` }}</p>
       </template>
       <div class="modal-actions">

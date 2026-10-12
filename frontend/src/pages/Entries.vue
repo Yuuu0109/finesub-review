@@ -3,11 +3,21 @@ import { onMounted, ref, watch } from "vue";
 import { api, date, labels, type Entry } from "../api";
 import { useApp } from "../context";
 import Icon from "../components/Icon.vue";
-const props = defineProps<{ mine?: boolean; search?: string }>();
+const props = defineProps<{
+  mine?: boolean;
+  search?: string;
+  initialStatus?: string;
+}>();
 const { go, toast, people } = useApp();
 const rows = ref<Entry[]>([]),
   query = ref(props.search || ""),
-  status = ref(""),
+  status = ref(
+    ["pending", "needs_changes", "approved", "rejected"].includes(
+      props.initialStatus || "",
+    )
+      ? props.initialStatus!
+      : "",
+  ),
   category = ref(""),
   page = ref(1),
   total = ref(0),
@@ -51,15 +61,7 @@ onMounted(load);
 <template>
   <div class="page-heading">
     <div>
-      <div class="eyebrow">{{ mine ? "我的审核" : "知识库" }}</div>
-      <h1>{{ mine ? "分配给我的知识" : "逐条核实，保留每一次判断。" }}</h1>
-      <p>
-        {{
-          mine
-            ? "认领的任务与管理员分配的词条会集中在这里。"
-            : "浏览主播档案、通用知识和翻译纠错，查看版本差异与审核记录。"
-        }}
-      </p>
+      <h1>{{ mine ? "我的审核" : "知识库" }}</h1>
     </div>
     <button class="button" @click="load">
       <Icon name="refresh" :size="17" />刷新
@@ -99,7 +101,7 @@ onMounted(load);
             <th>成员记录</th>
             <th>负责人</th>
             <th>更新时间</th>
-            <th></th>
+            <th><span class="sr-only">操作</span></th>
           </tr>
         </thead>
         <tbody>

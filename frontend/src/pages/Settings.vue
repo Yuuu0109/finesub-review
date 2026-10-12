@@ -111,19 +111,15 @@ async function loadAudit() {
 <template>
   <div class="page-heading">
     <div>
-      <div class="eyebrow">{{ accountOnly ? "我的账号" : "管理设置" }}</div>
       <h1>
         {{
           accountOnly
             ? user?.passcode_member
               ? "我的审核署名"
               : "账号与登录安全"
-            : "简单的角色，明确的决定权。"
+            : "管理设置"
         }}
       </h1>
-      <p v-if="!accountOnly">
-        仅设管理员和普通成员。成员意见只作记录，最终决定始终由管理员作出。
-      </p>
     </div>
     <button
       v-if="!accountOnly && user?.role === 'admin'"
@@ -243,7 +239,9 @@ async function loadAudit() {
           </select></label
         >
         <div class="callout">
-          “保留分类”用于现有 Markdown 和旧翻译纠错归档。FineSub 0.5.1 使用可选 [标记] 和四列术语行，支持翻译风格，已不再读取旧翻译纠错格式；v17 保留旧分类校验。改变规则不会自动迁移正文，导入、裁决和发布会按选定规则校验。
+          “保留分类”用于现有 Markdown 和旧翻译纠错归档。FineSub 0.5.1 使用可选
+          [标记] 和四列术语行，支持翻译风格，已不再读取旧翻译纠错格式；v17
+          保留旧分类校验。改变规则不会自动迁移正文，导入、裁决和发布会按选定规则校验。
         </div>
         <button class="button primary" :disabled="busy">保存设置</button>
       </form>

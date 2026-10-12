@@ -3,6 +3,8 @@ import { computed, onMounted, onUnmounted, provide, ref } from "vue";
 import { api, post, setCsrf, type User, type Notice, date } from "./api";
 import { request } from "./transport";
 import Icon from "./components/Icon.vue";
+import Brand from "./components/Brand.vue";
+import WelcomePanel from "./components/WelcomePanel.vue";
 import Modal from "./components/Modal.vue";
 import Dashboard from "./pages/Dashboard.vue";
 import Entries from "./pages/Entries.vue";
@@ -64,6 +66,9 @@ function go(target: string, id?: string) {
 }
 function hashChanged() {
   route.value = location.hash.slice(2) || "dashboard";
+}
+function closeSidebar(event: KeyboardEvent) {
+  if (event.key === "Escape") sidebar.value = false;
 }
 async function refresh() {
   if (!user.value) return;
@@ -167,6 +172,7 @@ async function markRead() {
 }
 onMounted(async () => {
   window.addEventListener("hashchange", hashChanged);
+  window.addEventListener("keydown", closeSidebar);
   window.addEventListener("session-expired", expired);
   try {
     const b = await api("/bootstrap");
@@ -196,6 +202,7 @@ onUnmounted(() => {
   clearInterval(poll);
   clearTimeout(toastTimer);
   window.removeEventListener("hashchange", hashChanged);
+  window.removeEventListener("keydown", closeSidebar);
   window.removeEventListener("session-expired", expired);
 });
 </script>
@@ -203,70 +210,62 @@ onUnmounted(() => {
   <div v-if="loading" class="boot">
     <span class="spinner"></span>正在打开知识库
   </div>
-  <main v-else-if="!user" class="login-screen">
-    <div class="login-story">
-      <div class="brand">
-        <span class="brand-mark"><Icon name="book" :size="26" /></span
-        ><span>FineSub <small>知识库审核</small></span>
-      </div>
-      <div class="login-copy">
-        <div class="eyebrow">共同校对 · 逐条确认</div>
-        <h1>让每一条知识，<br />都有据可依。</h1>
-        <p>
-          查看知识原文，留下你的判断。<br />把讨论和依据留在一起，由管理员完成定稿。
-        </p>
-        <div class="sample-document">
-          <span class="document-label">审核工作流</span>
-          <div><span class="step-dot">1</span>导入待审知识</div>
-          <i></i>
-          <div><span class="step-dot">2</span>成员记录意见与依据</div>
-          <i></i>
-          <div><span class="step-dot last">3</span>管理员决定并发布</div>
+  <main v-else-if="!user" class="entry-screen login-screen">
+    <div class="entry-layout">
+      <WelcomePanel />
+      <section class="entry-form login-form">
+        <div class="entry-form-content">
+          <span class="entry-symbol"><Icon name="key" :size="24" /></span>
+          <h2>进入知识库</h2>
+          <form v-if="accessConfigured" @submit.prevent="enter">
+            <label for="access-passphrase">访问口令</label>
+            <div class="entry-input">
+              <Icon name="key" :size="18" /><input
+                id="access-passphrase"
+                v-model="passphrase"
+                type="password"
+                autocomplete="off"
+                required
+                autofocus
+                maxlength="256"
+                placeholder="输入访问口令"
+                :disabled="loginBusy"
+              />
+            </div>
+            <p v-if="loginError" class="form-error" role="alert">
+              {{ loginError }}
+            </p>
+            <button class="button primary full" :disabled="loginBusy">
+              <span v-if="loginBusy" class="spinner"></span>
+              {{ loginBusy ? "正在进入…" : "进入知识库"
+              }}<Icon v-if="!loginBusy" name="arrow" :size="18" />
+            </button>
+          </form>
+          <div v-else class="callout">
+            {{ loginError || "访问口令尚未设置，请联系管理员。" }}
+          </div>
         </div>
-      </div>
-      <span class="login-foot">FineSub / Knowledge Review</span>
+      </section>
     </div>
-    <section class="login-form">
-      <div class="eyebrow">团队工作空间</div>
-      <h2>进入知识库</h2>
-      <p class="muted">输入访问口令，参与知识校对。</p>
-      <form v-if="accessConfigured" @submit.prevent="enter">
-        <label
-          >访问口令<input
-            v-model="passphrase"
-            type="password"
-            autocomplete="off"
-            required
-            autofocus
-            maxlength="256"
-            placeholder="输入访问口令"
-        /></label>
-        <p v-if="loginError" class="form-error" role="alert">
-          {{ loginError }}
-        </p>
-        <button class="button primary full" :disabled="loginBusy">
-          {{ loginBusy ? "正在进入…" : "进入知识库"
-          }}<Icon name="arrow" :size="18" />
-        </button>
-      </form>
-      <div v-else class="callout">
-        {{ loginError || "访问口令尚未设置，请联系管理员。" }}
-      </div>
-      <div class="login-note">
-        <Icon name="shield" :size="17" /><span
-          >成员提交意见，最终决定由管理员完成。</span
-        >
-      </div>
-    </section>
   </main>
   <div v-else class="app-shell">
     <div v-if="sidebar" class="sidebar-overlay" @click="sidebar = false"></div>
-    <aside class="sidebar" :class="{ expanded: sidebar }">
-      <button class="brand" @click="go('dashboard')">
-        <span class="brand-mark"><Icon name="book" :size="24" /></span
-        ><span>FineSub<small>知识库审核</small></span>
+    <aside id="app-navigation" class="sidebar" :class="{ expanded: sidebar }">
+      <button
+        class="brand-home"
+        aria-label="FineSub 工作台"
+        @click="go('dashboard')"
+      >
+        <Brand />
       </button>
       <div class="workspace-label">{{ settings.name }}</div>
+      <button
+        class="icon-button mobile-only sidebar-close"
+        aria-label="关闭导航"
+        @click="sidebar = false"
+      >
+        <Icon name="close" :size="18" />
+      </button>
       <nav aria-label="主导航">
         <button
           v-for="item in nav"
@@ -275,6 +274,11 @@ onUnmounted(() => {
             active:
               page === item.id || (page === 'review' && item.id === 'entries'),
           }"
+          :aria-current="
+            page === item.id || (page === 'review' && item.id === 'entries')
+              ? 'page'
+              : undefined
+          "
           @click="go(item.id)"
         >
           <Icon :name="item.icon" /><span>{{ item.label }}</span>
@@ -317,6 +321,8 @@ onUnmounted(() => {
           <button
             class="icon-button mobile-only"
             aria-label="打开导航"
+            aria-controls="app-navigation"
+            :aria-expanded="sidebar"
             @click="sidebar = true"
           >
             <Icon name="menu" /></button
@@ -366,9 +372,10 @@ onUnmounted(() => {
       >
         <Dashboard v-if="page === 'dashboard'" /><Entries
           v-else-if="page === 'entries' || page === 'mine'"
-          :key="page"
+          :key="route"
           :mine="page === 'mine'"
           :search="globalSearch"
+          :initial-status="page === 'entries' ? selectedId : ''"
         /><ReviewPage
           v-else-if="page === 'review'"
           :key="selectedId"
@@ -399,6 +406,7 @@ onUnmounted(() => {
           >管理员账号<input
             v-model="username"
             autocomplete="username"
+            autofocus
             required
             maxlength="80"
             placeholder="输入管理员账号"
