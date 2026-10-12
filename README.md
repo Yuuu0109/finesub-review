@@ -118,6 +118,16 @@ docker compose -f compose.yml -f compose.https.yml up -d --build
 
 也可以使用现有反向代理连接本机 8766。HTTPS/DNS/证书签发需在实际目标服务器验证，不能以本地构建结果代替。
 
+没有域名、使用公网 IP，且 80 已被现有 Nginx 等服务占用时，可将 `.env` 中的 `REVIEW_DOMAIN` 设置为公网 IP，并使用独立的仅 443 配置：
+
+```bash
+docker-compose -f compose.yml -f compose.ip-https.yml pull caddy
+docker-compose -f compose.yml -f compose.ip-https.yml up -d caddy
+docker logs --tail=100 finesub-review-caddy-1
+```
+
+此配置与 `compose.https.yml` 二选一，不要同时叠加。它保留现有 80 端口服务，仅发布 443，使用 Let’s Encrypt `shortlived` IP 证书和 TLS-ALPN-01 验证，自动续期，并强制启用安全会话 Cookie。服务器公网 TCP 443 必须可达且未被其他服务占用；此方案不适用于私有 IP。验证 `curl -fsS https://公网IP/api/health` 成功后，EXE 可填写同一 HTTPS 地址。使用 Docker Compose 插件的服务器可将 `docker-compose` 换为 `docker compose`。
+
 来源文档：[Vue](https://vuejs.org/guide/quick-start.html)、[FastAPI 上传](https://fastapi.tiangolo.com/tutorial/request-files/)、[SQLAlchemy](https://docs.sqlalchemy.org/en/20/orm/quickstart.html)、[Docker Compose](https://docs.docker.com/compose/)、[Caddy 反向代理](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)。
 
 ## 数据、备份与恢复
