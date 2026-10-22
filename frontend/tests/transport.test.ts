@@ -27,12 +27,12 @@ test("desktop transport retains CSRF, multipart files and binary downloads", asy
     throw new Error(`Unexpected IPC command ${command}`);
   });
   try {
-    const { request, selectServer, scopedDraftKey } = await import("../src/transport.ts");
-    selectServer("https://review.example.com");
+    const { request, savedServer, selectServer, scopedDraftKey } = await import("../src/transport.ts");
+    assert.equal(savedServer(), "https://49.234.185.63");
     const form = new FormData();
     form.append("files", new Blob(["知识正文"], { type: "text/markdown" }), "知识.md");
     const response = await request("/imports", { method: "POST", headers: { "X-CSRF-Token": "test-csrf" }, body: form });
-    assert.equal(config.url, "https://review.example.com/api/imports");
+    assert.equal(config.url, "https://49.234.185.63/api/imports");
     assert.equal(config.maxRedirections, 0);
     assert.equal(config.method, "POST");
     const headers = new Headers(config.headers);
@@ -44,6 +44,7 @@ test("desktop transport retains CSRF, multipart files and binary downloads", asy
     assert.deepEqual(new Uint8Array(await response.arrayBuffer()), new Uint8Array([80, 75, 0, 255]));
     const oldKey = scopedDraftKey("same-user-and-entry");
     selectServer("https://another.example.com");
+    assert.equal(savedServer(), "https://another.example.com");
     assert.notEqual(scopedDraftKey("same-user-and-entry"), oldKey);
   } finally {
     clearMocks();

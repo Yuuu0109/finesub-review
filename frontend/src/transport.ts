@@ -1,12 +1,12 @@
 import { isTauri } from "@tauri-apps/api/core";
-import { apiUrl, normalizeServer } from "./server.ts";
+import { apiUrl, DEFAULT_SERVER, normalizeServer } from "./server.ts";
 
 export const desktop = isTauri();
 const serverKey = "finesub-review.server";
-let server = "";
+let server = desktop ? savedServer() : "";
 
 export function savedServer(): string {
-  return localStorage.getItem(serverKey) || "";
+  return localStorage.getItem(serverKey) || DEFAULT_SERVER;
 }
 
 export function selectServer(value: string): void {

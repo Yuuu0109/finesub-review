@@ -1,3 +1,5 @@
+export const DEFAULT_SERVER = "https://49.234.185.63";
+
 /** Desktop servers are origin-only; never accept credentials or URL paths. */
 export function normalizeServer(value: string): string {
   let url: URL;

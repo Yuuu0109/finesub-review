@@ -7,7 +7,9 @@ import { normalizeServer } from "./server";
 import DesktopUpdate from "./components/DesktopUpdate.vue";
 import WelcomePanel from "./components/WelcomePanel.vue";
 const address = ref(savedServer());
+const serverSetupKey = "finesub-review.server-setup";
 const connected = ref(false),
+  checking = ref(true),
   busy = ref(false),
   error = ref("");
 async function connect() {
@@ -27,14 +29,26 @@ async function connect() {
   }
 }
 function switchServer() {
-  if (window.confirm("返回服务器设置？请先保存当前编辑内容。"))
+  if (window.confirm("返回服务器设置？请先保存当前编辑内容。")) {
+    sessionStorage.setItem(serverSetupKey, "true");
     location.reload();
+  }
 }
-// Always show the connection screen, so an unavailable server can be changed.
-onMounted(() => (document.title = "FineSub 知识库审核"));
+onMounted(async () => {
+  document.title = "FineSub 知识库审核";
+  if (sessionStorage.getItem(serverSetupKey)) {
+    sessionStorage.removeItem(serverSetupKey);
+  } else {
+    await connect();
+  }
+  checking.value = false;
+});
 </script>
 <template>
-  <div v-if="connected" class="desktop-connected">
+  <div v-if="checking" class="boot" role="status">
+    <span class="spinner"></span>正在连接知识库
+  </div>
+  <div v-else-if="connected" class="desktop-connected">
     <div class="desktop-bar">
       <span class="desktop-bar-brand">FineSub Review</span>
       <div class="desktop-bar-actions">
