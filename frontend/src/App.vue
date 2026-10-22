@@ -325,9 +325,9 @@ onUnmounted(() => {
             :aria-expanded="sidebar"
             @click="sidebar = true"
           >
-            <Icon name="menu" /></button
-          ><span class="muted">知识协作</span><span class="separator">/</span
-          ><strong>{{ title }}</strong>
+            <Icon name="menu" />
+          </button>
+          <strong>{{ title }}</strong>
         </div>
         <div class="topbar-actions">
           <button

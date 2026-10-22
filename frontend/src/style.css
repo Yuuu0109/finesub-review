@@ -741,9 +741,6 @@ form > label {
   font-weight: 600;
   color: var(--ink-1);
 }
-.separator {
-  color: var(--line-2);
-}
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -2813,10 +2810,6 @@ summary:focus-visible {
   }
   .topbar-title {
     gap: 8px;
-  }
-  .topbar-title > .muted,
-  .topbar-title > .separator {
-    display: none;
   }
   .role-chip {
     font-size: 11px;
