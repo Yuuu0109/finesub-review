@@ -128,6 +128,17 @@ docker logs --tail=100 finesub-review-caddy-1
 
 此配置与 `compose.https.yml` 二选一，不要同时叠加。它保留现有 80 端口服务，仅发布 443，使用 Let’s Encrypt `shortlived` IP 证书和 TLS-ALPN-01 验证，自动续期，并强制启用安全会话 Cookie。服务器公网 TCP 443 必须可达且未被其他服务占用；此方案不适用于私有 IP。验证 `curl -fsS https://公网IP/api/health` 成功后，EXE 可填写同一 HTTPS 地址。使用 Docker Compose 插件的服务器可将 `docker-compose` 换为 `docker compose`。
 
+IP 配置中的 `default_sni {$REVIEW_DOMAIN}` 用于不发送 SNI 的客户端，在 Docker 端口映射下选择正确的公网 IP 证书。已有部署更新此文件后，重新创建 Caddy 容器并检查接口：
+
+```bash
+docker-compose -f compose.yml -f compose.ip-https.yml up -d --no-deps --force-recreate caddy
+curl -fsS https://公网IP/api/health
+```
+
+`Caddyfile.ip` 以单文件绑定挂载。使用 Git、`sed -i` 或编辑器替换文件后，容器可能仍挂载旧文件，仅执行 `caddy reload` 无法读取新内容。重新创建 Caddy 可刷新挂载，并沿用原有证书数据卷。
+
+配置依据：[Caddy 默认 SNI](https://caddyserver.com/docs/caddyfile/options#default-sni)。
+
 来源文档：[Vue](https://vuejs.org/guide/quick-start.html)、[FastAPI 上传](https://fastapi.tiangolo.com/tutorial/request-files/)、[SQLAlchemy](https://docs.sqlalchemy.org/en/20/orm/quickstart.html)、[Docker Compose](https://docs.docker.com/compose/)、[Caddy 反向代理](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)。
 
 ## 数据、备份与恢复
