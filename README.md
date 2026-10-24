@@ -68,33 +68,38 @@ cd ..
 - 默认 `legacy-preserve` 保留现有正文和分类，包括旧知识库的“企划”等类型。
 - `finesub-0.5.1` 对照 `Yuuu0109/nonoka-sub-x` 的 `main` 提交 `af32b0145f70a98199b246704076c384bfda95ee`（FineSub 0.5.1、schema 5），需在“知识库设置”中主动选择。新建内容保持当前严格规则，支持 `[字段] 正文`、四列术语、空占位及 HTML 格式提示。已有旧条目可以依据审核库中的已存版本定点兼容保存；不把旧节点全部转换成新 `note` 或移入“待归类”。这不改变未打补丁的原生默认编辑器。
 - 当前原生知识源为 `knowledge.sqlite`；本站审核和导出 Markdown 投影。同一上传根同时有 `rendered/` 与历史 `common/streamer/style/` 时，优先当前投影并提示跳过的档案。仅有 SQLite 而无关联投影时拒绝用历史文件代替。不会读取或修改上传数据库，也不导出原生节点 ID、历史、分享 bundle 或签名。
-- `style/名称.md` 保留完整风格正文，按原生规则校验约定和正反例；style 仅供显式选择，不参加名称匹配，不生成 `style/index.md`。
+- `finesub-0.6.0` 对照 `Yuuu0109/nonoka-sub-x@eb642f25e7bc83cb18c4e7a4e0289d410c643fbc`（FineSub 0.6.0、schema 6）。common 普通章节接受四列术语与事实短句，支持“重分类理由”元数据，人工版本注释只作为历史显示。规则和原生回写已用隔离 schema 6 副本验证；源库没有迁移或修改知识数据。
+- 当前格式发布包附 `finesub-review-profile.json`，注明规则、目标 schema 和引擎来源。验证/兼容导入会拒绝版本错配；已有 schema 5 包继续支持。切换设置不会自动升级原生数据库或重写正文。
+- `style/名称.md` 保留完整风格正文，按原生规则校验约定和正反例；style 不参加 common/streamer 名称匹配，不生成 `style/index.md`。
 - 可切换 `finesub-code-v17`，按核对过的本地 FineSub 校验代码限制 common 类型为“游戏、梗、事件、人物”。这不是对任意 FineSub 版本的兼容保证。
 - `common/index.md` 和 `streamer/index.md` 作为上传原件保存，不作为可编辑知识正文；导出时从获准正文重建。common 索引中的原有类型会随修订保留，支持原生索引的本名和别名；没有明确类型的正文不会被自动改成其他类型。
 - `translation/common-mistake.md` 拆成 `Mxxxx` 记录及独立精选清单；导出时组装。精选最多 30 条，必须引用已经纳入本次发布的编号。
 - `translation/good-example.md` 按 `Gxxxx` 记录拆分及组装。
-- 上述 translation 归档行为适用于旧兼容配置；当前 FineSub 0.5.1 已移除这些读取器，严格配置会逐条提示不支持，不自动迁移为 style。
+- 上述 translation 归档行为适用于旧兼容配置；FineSub 0.5.1 / 0.6.0 已移除这些读取器，严格配置会逐条提示不支持，不自动迁移为 style。
 - JSONL 支持 `create_entry / append_lines / replace_section / edit_lines / rename_entry / delete_entry`，也支持 `add_mistake / set_featured / add_example` 及相应 XML 包裹块。
 - `edit_lines` 需要 `base_sha256` 对应基础正文，并将同一文件的行改动合并到一个提案；缺少快照依据时拒绝应用。新建词条需要说明未并入现有词条的 `reason`。
 - JSONL 内相关操作按变更组处理，首次发布必须一起通过与发布。翻译提案新增编号在预检时从现有/保留编号之后分配；若并行批次冲突，确认导入会拒绝覆盖，重新预检即可。
 - 不接受任意脚本生成的自定义 JSON；请转换为 Markdown 或规范 JSONL。
 - 导入文件必须为 UTF-8；最多 200 个上传文件，ZIP 最多 2000 个条目，单个解压文件最多 2 MB，每批原始上传/解压内容最多 30 MB。
 - 当前节点正文另有 1,000,000 UTF-8 字节限制。格式错误显示在对应预检条目中，保留正文与原始上传文件；可只确认同批有效条目。确认和裁决时会重新按当前配置校验。
-- 管理员修订草稿保存在当前标签页的 sessionStorage 中，刷新后可恢复。保存使用编辑时的版本；遇到并行修改会保留草稿，刷新后显示旧基线提示，须查看当前正文并手动合并再继续保存。清除浏览器数据或关闭标签页可能清除未保存草稿。
+- 正文修订、成员意见和决定理由保存在本机 localStorage，按用户和版本隔离；桌面端还按服务器隔离，可跨刷新或程序重启恢复。旧标签页草稿会迁入持久存储。保存仍使用编辑时的版本；遇到并行修改会保留草稿，须对照当前正文并手动合并。草稿只在本机，清除应用/浏览器数据会丢失；存储失败时页面明确提示，更新重启也会被阻止。
+- 知识列表支持“我未审核”，只统计本人对当前版本提交的审核记录，回复和其他成员的意见不算。分类、批次、关联组、负责人范围随审核页面保留；“提交并继续”和裁决后的继续操作使用稳定版本游标，处理后不跳过下一条。返回队列恢复原筛选，新修订仍需重新审核。
+- 差异可对照上一版本或当前正式版本，切换对比不重置编辑草稿。未保存正文修订时先保存或丢弃，再作出裁决。来源、负责人和历史版本在可展开区域中，窄屏同样可以访问。
+- 发布页提前列出基线变化、格式校验和关联组未通过等阻塞原因，选择关联组时自动联动；正式发布仍由后端和 worker 复核。已发布的删除项满足所在组的发布要求，不再阻塞同组后续修订。
 
 发布结果的 `verification: adapter-validation` 代表本站适配器校验，不代表服务器上已安装 FineSub。可对导出包执行真正的原生读取检查：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/verify_finesub.py --finesub-src 路径\nonoka-sub-x\third_party\finesub\src --archive 路径\知识库包.zip --profile finesub-0.5.1
+.\.venv\Scripts\python.exe scripts/verify_finesub.py --finesub-src 路径\nonoka-sub-x\third_party\finesub\src --archive 路径\知识库包.zip --profile finesub-0.6.0
 ```
 
-当前配置会在临时目录创建 schema 5 存储，调用指定源码的原生编辑器，再核对正文节点、别名/误听、索引元数据、渲染重读幂等性及 style 不参加名称匹配。部分拒绝或暂存也视为失败；临时数据库不会写回真实知识库。旧配置使用对应原生导入器；指定版本缺少 translation 读取器时明确失败，不把归档成功报告为当前原生读取成功。此检查不执行翻译任务、Git 操作或分享操作。
+当前配置会在临时目录创建与规则相符的 schema 5 或 6 存储，调用指定源码的原生编辑器，再核对正文节点、别名/误听、索引元数据、渲染重读幂等性及 style 不参加名称匹配。也可省略 `--profile`，由新版发布包中的版本声明选择规则；声明与引擎 schema 不匹配时拒绝。部分拒绝或暂存也视为失败；临时数据库不会写回真实知识库。旧配置使用对应原生导入器；指定版本缺少 translation 读取器时明确失败，不把归档成功报告为当前原生读取成功。此检查不执行翻译任务、Git 操作或分享操作。
 
 ### 旧知识定点兼容
 
 在当前配置下，审核库已有的 common/streamer 旧正文（旧式档案身份字段或不符合当前行体/章节规则）可保留原文、修订简介及现有节点值。章节、行数、顺序、标记、名称、别名、读音和术语前三列保持；含“误听”提示的旧行暂不支持修订。无法可靠映射时明确拒绝并保留草稿。没有已有版本的新文件仍严格校验，上传包自己声明的基线不能授予例外。无需修改真实知识库来启用这一审核路径，也没有自动切换现有站点配置。
 
-兼容发布包含 `finesub-review-compat.json`，保存已有版本的正文基线及目标哈希。审核站内可重新预检；原生应用需使用 `scripts/apply_compat_release.py` 和另行安装的受限引擎补丁。普通 `verify_finesub.py` 会明确拒绝把兼容包导入空库：只有 Markdown 无法恢复原节点类型、证据及匹配历史。引擎补丁已在隔离副本验证，没有安装到用户 nonoka；默认原生编辑器及投影收割路径仍按原规则运行。
+兼容发布包含 `finesub-review-compat.json`，保存已有版本的正文基线、目标哈希及版本。审核站内可重新预检；原生应用需使用 `scripts/apply_compat_release.py` 和对应 schema 5 / 6 的受限引擎补丁。默认 dry-run 使用临时数据库快照；`--apply` 才提交原生用户修订。schema 6 的历史人工认可记录保留，只有修改过的值成为新人工版本，其他行不会被自动认可。普通 `verify_finesub.py` 会明确拒绝把兼容包导入空库：只有 Markdown 无法恢复原节点类型、证据及匹配历史。引擎补丁已在隔离副本验证，没有安装到用户 nonoka；默认原生编辑器及投影收割路径仍按原规则运行。
 
 支持范围、补丁目标、备份、dry-run、原子冲突回滚及运行方法见 [旧知识兼容操作说明](scripts/COMPATIBILITY.md)。原项目 Python 服务下次正常重启后加载后端修改；前端构建后刷新页面。本次不重启既有服务、迁移数据、推送或部署。
 
@@ -179,6 +184,6 @@ $env:TEST_DATABASE_URL='postgresql+psycopg://用户名:密码@127.0.0.1:端口/f
 Remove-Item Env:TEST_DATABASE_URL
 ```
 
-要启用当前原生 schema 5 验证，运行测试前将 `FINESUB_REFERENCE_SRC` 设置为上述明确版本的 `third_party/finesub/src`。`REVIEW_KNOWLEDGE_TEST_ROOT` 可指定只读真实知识库夹具；存在 `rendered/` 时只核对当前投影。未提供原生源码时该项测试会明确跳过。
+原生测试需显式提供对应源码和隔离知识库夹具：schema 5 使用 `FINESUB_REFERENCE_SRC`、`FINESUB_COMPAT_SRC`、`REVIEW_KNOWLEDGE_TEST_ROOT`；schema 6 使用 `FINESUB6_REFERENCE_SRC`、`FINESUB6_COMPAT_SRC`、`REVIEW_SCHEMA6_TEST_ROOT`。`REFERENCE` 为原版，`COMPAT` 为打过对应补丁的副本。完整命令见 [兼容操作说明](scripts/COMPATIBILITY.md)；未提供对应环境时测试明确跳过。
 
 测试会清空指定的测试数据库；禁止指向其他业务数据库。若父目录存在 `knowledge`，还会只读执行真实知识库往返测试。浏览器验收应再检查管理员导入/裁决/发布、普通成员记录、移动端布局、键盘操作与 Markdown 渲染。

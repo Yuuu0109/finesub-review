@@ -21,6 +21,8 @@
 
 ## Windows 开发与打包
 
+本机轻量方案：使用仓库现有 GitHub Actions 的 **Windows desktop build**。Rust、MSVC 和编译缓存由 Windows 云端 runner 提供，本机只需下载最终免安装 EXE；修改代码时可以仅运行 Node/Python 检查。构建与公开发布分开，Actions 不会自动创建 Release。
+
 0.2.2 起使用美香主题图标。当前图标源文件为 `frontend/src-tauri/icons/mika-source.png`，使用 `pnpm tauri icon src-tauri/icons/mika-source.png`（在 frontend 目录）重新生成图标；原 `source.svg` 仅作为旧图标备份。
 
 需要 Node.js 22.12+、pnpm 11、Rust stable（至少 1.90）、Visual Studio C++ Build Tools 和 WebView2。按 [Tauri 官方 Windows 前置要求](https://v2.tauri.app/start/prerequisites/#windows) 安装工具链。
@@ -37,32 +39,45 @@ pnpm desktop:build
 
 EXE 输出到 `frontend/src-tauri/target/release/finesub-review-desktop.exe`。`desktop:build` 使用 `--no-bundle` 跳过安装器，Tauri 配置也关闭安装包生成。Node、Rust、C++ 工具仅用于开发和构建，最终用户无需安装这些工具；WebView2 Runtime 需要已就绪。更新签名用于校验下载文件，没有 Windows Authenticode 证书签名，两种签名用途不同。
 
-仓库提供 `.github/workflows/desktop.yml`，推送相关分支或手动触发时在 Windows 上执行测试、构建、独立 EXE 签名和交付整理，结果保存为 Actions artifact，不自动发布 Release。PR 只运行测试，不读取签名密钥。仓库保留已验证的 `Cargo.lock`，CI 使用 `--locked` 检查完整依赖树。
+仓库提供 `.github/workflows/desktop.yml`，推送相关分支或手动触发时在 Windows 上执行测试、构建、独立 EXE 签名和交付整理，结果保存为 Actions artifact，不自动发布 Release。PR 只运行测试，不读取签名密钥。CI 使用 `cargo test --locked` 校验锁定依赖，交付前执行 `scripts/verify_desktop.mjs`，验证版本、Windows x64 格式、清单地址、SHA-256、更新签名和篡改拒绝。0.3.0 新增依赖的锁文件仍须通过该次云端原生构建确认。
 
 ## GitHub Releases 更新
 
-更新源固定为 `https://github.com/Yuuu0109/finesub-review/releases/latest/download/latest.json`。启动时后台检查一次，也可点击“检查更新”，无需先连接审核服务器。更新清单仅提供 `windows-x86_64-portable`，支持 0.2.1 起的免安装更新通道；0.2.0 用户需手动下载免安装 EXE。点击“下载新版”后验证签名并保存到系统“下载”目录，关闭当前程序后双击新版 EXE 即可，不运行安装器、不覆盖原文件。只接受本仓库 HTTPS Release 下载地址，并使用 Tauri 内置公钥验证签名。相同或更低版本不会提示升级。无法访问 GitHub 时可继续使用客户端并稍后重试。
+更新源固定为 `https://github.com/Yuuu0109/finesub-review/releases/latest/download/latest.json`。启动时后台检查一次，也可点击“检查更新”，无需先连接审核服务器。更新清单仅提供 `windows-x86_64-portable`，只接受与版本一致的本仓库 HTTPS Release EXE 地址，并使用 Tauri 内置公钥验证签名。相同或更低版本不会提示升级。更新源不可用或尚无公开清单时明确提示，不能据此判断已经是最新版。
+
+0.3.0 起的更新步骤：
+
+1. 点击“下载更新”，下载进度结束后校验签名及 Windows x64 程序格式；验证后的字节保存在本次进程中，不接收网页指定的本地执行路径。
+2. 下载成功后显示“重启更新”。用户确认前继续使用当前程序；退出程序后需要重新下载。
+3. 确认时检查审核操作是否完成并保存草稿和当前页面。程序在同一目录暂存新版及恢复副本，使用 `self-replace` 替换正在运行的 EXE，再从原路径重启，不启动安装器。目录需可写。
+4. 文件占用或写入失败会尝试恢复原文件并报告结果；恢复也失败时保留备份路径。可以重试或“另存新版”到下载目录，文件重名时另起名称，不覆盖已有下载。
+
+0.2.1–0.2.4 的旧客户端仍使用旧的“下载新版并手动运行”流程，首次升级到 0.3.0 需这样打开一次新 EXE；之后才能使用原位置替换。0.2.0 用户需手动下载免安装 EXE。WebView2 仍是系统运行前提。
 
 仓库及 Release 公开，客户端没有 GitHub 令牌。更新仅下载新版桌面程序，不迁移云端数据库，云服务器无需增加更新接口。
 
+0.3.0 增加的 FineSub 0.6.0 / schema 6 知识规则需要配套更新审核 API 和 worker，再由管理员在知识库设置中选择。EXE 更新不会自动改变该设置或迁移 FineSub 知识库。旧节点回写使用独立兼容工具和对应版本引擎补丁，见 [兼容操作说明](scripts/COMPATIBILITY.md)。
+
 后续发布步骤：
 
-1. 同步提升 `frontend/package.json`、`frontend/src-tauri/Cargo.toml`、`frontend/src-tauri/tauri.conf.json` 的版本，更新 `CHANGELOG.md`。
+1. 同步提升 `frontend/package.json`、`frontend/src-tauri/Cargo.toml`、`frontend/src-tauri/Cargo.lock` 根包、`frontend/src-tauri/tauri.conf.json` 的版本，更新 `CHANGELOG.md`。
 2. 推送到 `feat/desktop`，等待 Windows desktop build 成功，下载 `finesub-review-windows` artifact。交付目录仅包含四个文件：免安装 EXE、对应 `.sig`、`latest.json` 和 `SHA256SUMS.txt`。
 3. 在 GitHub 创建对应 `v版本号` Release，目标使用该次成功构建的提交，上传全部四个文件。确认所有附件齐全后发布为正式最新版（非预发布）。不要覆盖已发布版本的文件。
-4. 检查上述固定更新地址返回新版清单，并在上一版客户端执行检查、下载、签名验证与新版运行验收。
+4. 检查上述固定更新地址返回新版清单，并在上一版客户端执行检查、下载、签名验证与新版运行验收。0.3.0 同时增加了审核队列和发布候选 API，需配套更新服务端 API 与 worker；仅更新 EXE 不会部署服务端。
 
 也可用 GitHub CLI 发布，以下路径和版本需替换为本次实际值：
 
 ```powershell
-gh release create v0.2.3 --target 构建提交SHA --draft --title "FineSub Review 0.2.3 免安装版" --notes-file 发布说明文件
-gh release upload v0.2.3 output/desktop-0.2.3/*
-gh release edit v0.2.3 --draft=false --latest
+gh release create v0.3.0 --target 构建提交SHA --draft --title "FineSub Review 0.3.0 免安装版" --notes-file 发布说明文件
+gh release upload v0.3.0 output/desktop-0.3.0/*
+gh release edit v0.3.0 --draft=false --latest
 ```
 
 签名私钥保存在本机项目 `.secrets/desktop-updater.key`，另存于 GitHub Actions 的 `TAURI_SIGNING_PRIVATE_KEY` Secret；公钥已内置客户端。必须安全备份私钥，不能提交、随包分发或重新生成替换，否则已安装客户端无法信任后续更新。本机构建需要设置 `TAURI_SIGNING_PRIVATE_KEY` 为私钥文件绝对路径，`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 为空字符串；不可将签名变量写入可提交的 `.env`。
 
 ## 验收
+
+0.3.0 当前处于本地修改待提交阶段，尚未生成新 EXE。本机未安装 Rust/MSVC，使用已有 Node、Python 和 Edge 验证；原生 Rust 测试、锁文件解析、真实 EXE 替换重启及失败恢复，需要在批准提交后的 Windows 云端构建和实机测试中确认。浏览器更新验收使用模拟 IPC，不能代替这些原生结果。当前记录见 [VALIDATION.md](VALIDATION.md)。
 
 2026-10-12 免安装版 0.2.1：[构建 38156586017](https://github.com/Yuuu0109/finesub-review/actions/runs/38156586017) 原生测试、构建及独立 EXE 签名全部通过。[Release](https://github.com/Yuuu0109/finesub-review/releases/tag/v0.2.1) 已发布，`-portable.exe` 为 18,842,112 字节，SHA-256 为 `23a61b79216836ec9edf18b03dac210c7469dcb92b434d4862325a17b37f16d1`。本机直接启动交付 EXE，真实 IPC 返回 0.2.1；签名验证、篡改拒绝、匿名下载一致性检查通过。更新下载、错误重试与保存提示通过模拟 IPC 验证，原生测试确认不覆盖已有文件。本机原生 GitHub 检查遇到连接失败（公开清单与 EXE 手动下载正常）；尚未完成真实跨版本下载验收。
 
@@ -72,7 +87,7 @@ gh release edit v0.2.3 --draft=false --latest
 - 上传多文件/ZIP、预检、后台任务、审核与发布正常。
 - 原始上传文件、知识库 ZIP、审核归档可保存；取消保存不报错。
 - 重启客户端后会话行为符合服务端有效期，切换服务器不混用页面数据。
-- 无开发环境的 Windows 机器完成安装、启动、卸载和再次安装。
+- 无开发环境的 Windows 机器完成免安装启动、可写目录原位置更新、草稿恢复及文件占用时的另存回退。
 
 前端测试和构建成功不等于原生安装包或云服务器验收成功。
 
@@ -82,4 +97,4 @@ gh release edit v0.2.3 --draft=false --latest
 
 本机验证了同次构建的原生程序启动、真实 Tauri 版本 IPC、访问公开 GitHub 更新源并显示“已是最新版本”。安装包签名和 SHA-256 校验通过，修改一个字节后签名验证失败；匿名下载的清单与安装包和本机产物一致。前端测试 4 项、后端回归 10 项通过，更新提示、确认下载、进度、错误重试及后台检查中打开窗口通过浏览器模拟 IPC 验证。尚未执行真实跨版本覆盖安装、卸载或云端业务验收。
 
-实现依据：[HTTP 插件](https://v2.tauri.app/plugin/http-client/)、[文件对话框](https://v2.tauri.app/plugin/dialog/)、[文件系统权限](https://v2.tauri.app/plugin/file-system/)、[Windows 安装包](https://v2.tauri.app/distribute/windows-installer/)、[更新插件](https://v2.tauri.app/plugin/updater/)、[GitHub 构建分发](https://v2.tauri.app/distribute/pipelines/github/)。
+实现依据：[HTTP 插件](https://v2.tauri.app/plugin/http-client/)、[文件对话框](https://v2.tauri.app/plugin/dialog/)、[文件系统权限](https://v2.tauri.app/plugin/file-system/)、[更新插件](https://v2.tauri.app/plugin/updater/)、[self-replace 1.5.0](https://docs.rs/self-replace/1.5.0/self_replace/)、[GitHub 构建分发](https://v2.tauri.app/distribute/pipelines/github/)。

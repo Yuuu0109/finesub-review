@@ -1,4 +1,124 @@
-# 当前知识库适配验收 — 2026-10-01
+# 审核流程与免安装更新 — 2026-10-22
+
+代码基线为 `feat/desktop@f579532dbc06554834c95f94189cb3b4141e1380`，本轮修改版本为 0.3.0，尚未提交、推送、部署或发布 Release。测试只使用独立数据库、临时上传和知识库副本。
+
+| 本轮验证 | 结果与边界 |
+| --- | --- |
+| 后端完整回归 | 91 项通过、无失败或跳过；包括审核权限/CSRF、版本冲突、筛选游标、关联删除及排队变化、导入/发布/回退、schema 5/6 隔离原生读写、证据与人工认可记录保持 |
+| 前端单元测试 | 7 项通过；地址/传输边界、筛选与游标、关联组选择、持久存储与配额失败 |
+| 类型检查与构建 | `pnpm build` 通过；修复条件动态加载遗漏桌面 CSS，拆开两个启动分支 |
+| 真实浏览器业务流程 | 访问口令、管理员登录、上传/worker 预检/确认、批次与分类筛选、差异对比、草稿跨刷新恢复、409 冲突、裁决及意见后继续、worker 发布和 ZIP 下载全部通过，无页面异常 |
+| 草稿与布局 | 实际存储失败会阻止更新；1440 / 900 / 390px 无页面水平溢出，窄屏可访问来源、负责人和历史版本，已检查截图 |
+| 桌面更新界面 | 模拟 IPC 通过；连接前后保持同一更新状态、进度及互斥、验签失败、网络失败、重试、下载后确认重启、草稿阻止、页面恢复和另存回退；实际字体 14px、按钮内边距正常 |
+| schema 6 页面与格式 | 实际页面切换 0.6.0、刷新后保留设置、上传 common 事实短句、修订和裁决通过；独立 0.5.1 规则仍拒绝只支持术语章节中的短句 |
+| 页面文案 | 登录、工作台、导入、审核、发布、设置与更新弹窗移除宣传语、操作介绍和重复提示；状态、校验错误、冲突及删除/回退确认保留。登录与主要弹窗截图已复查 |
+| schema 6 原生往返 | 0.6.0 原生编辑器创建隔离库，3 主体、15 正文节点、5 索引项；正文/索引语义一致、渲染重读幂等，style 不参加名称匹配 |
+| schema 6 历史记录 | 三份真实旧条目在数据库副本上回写；另用原生引擎生成认可记录，验证旧 ack、未改行提示、待确认别名保持，审核值成为新人工版本；只改注释无新修订 |
+| 版本与误用保护 | 发布包声明规则/schema/引擎，旧清单仍按 schema 5 读取；引擎、包、库错配及未知 schema 在打开原生写库前拒绝。dry-run 在 SQLite 快照执行 |
+| 交付校验脚本 | 用已有 0.2.3 签名包验证 Windows x64、版本/地址、SHA-256、签名和篡改拒绝通过；这不是 0.3.0 产物验证 |
+| Windows 原生程序 | **待验证**。本机未安装 Rust/MSVC；新依赖锁文件、原生测试、0.3.0 编译、真实原位置替换和重启需批准提交后由云端构建及实机验证 |
+
+已补齐当前本机 schema 6 知识库的兼容验证。0.6.0 参考源码对应 `eb642f25e7bc83cb18c4e7a4e0289d410c643fbc`，schema、apply/envelope 和三份预设均逐文件核对该提交；新补丁只应用于隔离引擎。真实库通过 SQLite 在线备份生成测试快照，原有 204 个文件内容哈希保持；只读 SQLite 连接生成了空 WAL 辅助文件，没有修改知识数据。schema 5 使用历史副本独立回归，两版的三个样例核验声明均保持 6→6、10→10、7→7，节点类型、匹配项、归属边、核验/分享政策及证据历史保持。
+
+文案精简后重新通过 7 项前端测试、类型检查、生产构建、真实浏览器业务流程及模拟 IPC 更新验证；未改后端逻辑，上表 91 项后端结果沿用本轮此前的 schema 6 完整回归。截图等待提示消失、回到页首并关闭过渡动画后保存。
+
+本机证据：`test-results/workbench-295o2E/`（精简后真实页面、登录/导入/裁决/发布弹窗、发布包、schema 6 设置与审核截图）、`test-results/desktop-ui-2g0N4B/`（精简后模拟 IPC、截图与样式）、`test-results/native-preserved-finesub-0.5.1.json`、`test-results/native-preserved-finesub-0.6.0.json`、`test-results/native-schema6.json`、`test-results/native-schema6-human-marks.json`、`test-results/schema6-source-integrity.json`、`test-results/schema6-full.xml`。以上测试产物不提交到仓库。
+
+## 待批准的提交范围
+
+以下包含本次追加兼容修改、文案精简和此前尚未提交的审核、桌面优化。分支 `feat/desktop`；当前 38 个已跟踪文件修改、13 个新文件，索引为空，尚未创建提交或推送。测试产物、知识库快照、原生引擎副本和密钥均不在这份清单中。
+
+### 1. 审核工作流与页面
+
+建议提交信息：`[feat](review):优化连续审核与持久草稿`
+
+整文件：
+
+- `backend/app/services.py`
+- `backend/app/worker.py`
+- `backend/tests/conftest.py`
+- `backend/tests/test_review_queue.py`
+- `frontend/src/App.vue`
+- `frontend/src/api.ts`
+- `frontend/src/context.ts`
+- `frontend/src/components/WelcomePanel.vue`
+- `frontend/src/pages/Dashboard.vue`
+- `frontend/src/pages/Entries.vue`
+- `frontend/src/pages/Imports.vue`
+- `frontend/src/pages/Releases.vue`
+- `frontend/src/pages/ReviewPage.vue`
+- `frontend/src/workflow.css`
+- `frontend/src/workflow.ts`
+- `frontend/tests/workflow.test.ts`
+- `scripts/workbench_fixture.py`
+
+按代码块：`backend/app/main.py` 的队列/对比/候选接口；`frontend/src/main.ts` 的工作流样式导入；`README.md` 与 `CHANGELOG.md` 的审核说明。验证依据为后端全量回归、前端测试及真实页面流程。服务端 API/worker 与前端需要配套更新。
+
+### 2. 免安装程序更新
+
+建议提交信息：`[feat](desktop):完善免安装签名更新与原位重启`
+
+整文件：
+
+- `.github/workflows/desktop.yml`
+- `frontend/package.json`
+- `frontend/src-tauri/Cargo.lock`
+- `frontend/src-tauri/Cargo.toml`
+- `frontend/src-tauri/tauri.conf.json`
+- `frontend/src-tauri/src/main.rs`
+- `frontend/src-tauri/src/updates.rs`
+- `frontend/src-tauri/src/portable.rs`
+- `frontend/src/DesktopRoot.vue`
+- `frontend/src/components/DesktopUpdate.vue`
+- `scripts/package_desktop.mjs`
+- `scripts/verify_desktop.mjs`
+- `scripts/verify_desktop_ui.mjs`
+
+按代码块：`frontend/src/main.ts` 的入口加载修复；`DESKTOP.md`、`CHANGELOG.md` 的桌面更新说明。依赖第 1 组的持久草稿。前端构建、模拟 IPC 和已有包的验签检查通过；0.3.0 Rust 编译、锁文件完整性及真实替换重启仍需云端和实机验收。这是待验证的代码提交，不能当成 EXE 交付完成。
+
+### 3. FineSub 0.6.0 / schema 6 兼容
+
+建议提交信息：`[feat](knowledge):支持schema6知识库与保留历史的兼容回写`
+
+整文件：
+
+- `backend/app/compat.py`
+- `backend/app/node_compat.py`
+- `backend/app/node_markdown.py`
+- `backend/app/node_presets_0_6.json`
+- `backend/tests/test_preserved_values.py`
+- `backend/tests/test_schema6_knowledge.py`
+- `backend/tests/native_schema6_probe.py`
+- `frontend/src/pages/Settings.vue`
+- `frontend/src/pages/Streamer.vue`
+- `scripts/COMPATIBILITY.md`
+- `scripts/apply_compat_release.py`
+- `scripts/native_check.py`
+- `scripts/preserved_values.py`
+- `scripts/engine-preserved-values-0.6.0.patch`
+- `scripts/verify_workbench.mjs`
+- `VALIDATION.md`
+
+按代码块：`backend/app/main.py` 的设置版本枚举；`README.md`、`DESKTOP.md`、`CHANGELOG.md` 的 schema 6 说明。浏览器验收脚本同时覆盖第 1 组，最终验证报告汇总三组，因此此组建议最后提交。91 项后端回归、两版原生副本回写及 schema 6 页面流程通过；应用到实际知识库仍需对应引擎补丁、备份和显式 `--apply`，没有自动迁移。
+
+三个分组共享文件须按上述代码块暂存；批准前后均需重新核对差异，不能整文件混入其他组。原生 EXE 的构建/实机限制保持明确。用户可批准全部三组或指定编号；本清单本身不授权提交、推送、部署或公开 Release。
+
+复现浏览器检查前先在 frontend 执行 `pnpm build`，然后在仓库根目录运行：
+
+```powershell
+# 使用已有 Playwright 与 Edge；PLAYWRIGHT_MODULE 可以指向本机已安装模块。
+$env:PLAYWRIGHT_MODULE = '填写 Playwright 模块目录'
+$env:PLAYWRIGHT_CHANNEL = 'msedge'
+$env:PYTHONUTF8 = '1'
+node scripts/verify_workbench.mjs
+node scripts/verify_desktop_ui.mjs
+# 新产物在签名和 package_desktop.mjs 后执行：
+node scripts/verify_desktop.mjs
+```
+
+0.3.0 的审核队列、对比和候选检查需要服务端 API 与 worker 同步更新。仅更新 EXE 不会更新云端服务。普通成员仍只提交版本绑定意见，管理员独立裁决；原生更新和公开 Release 验收不在上述浏览器结果之内。
+
+# 历史：知识库适配验收 — 2026-10-01
 
 对照仓库为 `https://github.com/Yuuu0109/nonoka-sub-x`，分支 `main`，提交 `af32b0145f70a98199b246704076c384bfda95ee`；其中 `third_party/finesub/VERSION` 为 0.5.1，原生存储 schema 为 5。本次修改在隔离副本与独立 SQLite 数据库中验证，不写真实知识数据，不迁移业务数据库，不执行推送、部署或 Docker 重建。
 
