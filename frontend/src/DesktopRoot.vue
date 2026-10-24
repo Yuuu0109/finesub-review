@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import App from "./App.vue";
 import Icon from "./components/Icon.vue";
-import { probeServer, savedServer, selectServer } from "./transport";
+import { probeServer, savedServer, selectServer, scopedDraftKey } from "./transport";
 import { normalizeServer } from "./server";
 import DesktopUpdate from "./components/DesktopUpdate.vue";
 import WelcomePanel from "./components/WelcomePanel.vue";
@@ -19,6 +19,10 @@ async function connect() {
     const value = normalizeServer(address.value);
     await probeServer(value);
     selectServer(value);
+    const resumeKey = scopedDraftKey("finesub-update-route");
+    const resume = localStorage.getItem(resumeKey);
+    if (resume && /^#\/(dashboard|entries|mine|review|imports|releases|streamer)([/?]|$)/.test(resume)) location.hash = resume;
+    localStorage.removeItem(resumeKey);
     address.value = value;
     connected.value = true;
   } catch (e) {
@@ -45,26 +49,20 @@ onMounted(async () => {
 });
 </script>
 <template>
+  <div class="desktop-bar">
+    <span class="desktop-bar-brand">FineSub Review</span>
+    <div class="desktop-bar-actions">
+      <template v-if="connected">
+        <span class="server-status"><span></span>已连接</span>
+        <button class="server-switch" type="button" :title="address" @click="switchServer"><Icon name="settings" :size="14" />更换服务器</button>
+      </template>
+      <DesktopUpdate />
+    </div>
+  </div>
   <div v-if="checking" class="boot" role="status">
     <span class="spinner"></span>正在连接知识库
   </div>
   <div v-else-if="connected" class="desktop-connected">
-    <div class="desktop-bar">
-      <span class="desktop-bar-brand">FineSub Review</span>
-      <div class="desktop-bar-actions">
-        <span class="server-status"><span></span>已连接</span>
-        <button
-          class="server-switch"
-          type="button"
-          :title="address"
-          @click="switchServer"
-        >
-          <span>{{ address }}</span
-          ><Icon name="settings" :size="14" />更换服务器
-        </button>
-        <DesktopUpdate />
-      </div>
-    </div>
     <App />
   </div>
   <main v-else class="entry-screen desktop-connect">
@@ -87,10 +85,8 @@ onMounted(async () => {
                 placeholder="https://review.example.com"
                 autocomplete="url"
                 spellcheck="false"
-                aria-describedby="server-hint"
               />
             </div>
-            <p id="server-hint" class="input-hint">使用团队提供的 HTTPS 地址</p>
             <p v-if="error" class="form-error" role="alert">{{ error }}</p>
             <button class="button primary full" :disabled="busy">
               <span v-if="busy" class="spinner"></span
@@ -98,14 +94,9 @@ onMounted(async () => {
               }}<Icon v-if="!busy" name="arrow" :size="18" />
             </button>
           </form>
-          <div class="entry-note">
-            <Icon name="shield" :size="15" /><span
-              >安全连接 · 服务器地址保存在本机</span
-            >
-          </div>
         </div>
         <div class="entry-form-footer">
-          <span>桌面客户端</span><DesktopUpdate />
+          <span>桌面客户端 · 免安装运行</span>
         </div>
       </section>
     </div>

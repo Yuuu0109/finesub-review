@@ -4,6 +4,11 @@ import { createHash } from 'node:crypto';
 const root = resolve(import.meta.dirname, '..');
 const config = JSON.parse(await readFile(join(root, 'frontend/src-tauri/tauri.conf.json'), 'utf8'));
 const version = config.version;
+if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new Error('Invalid release version');
+const pkg = JSON.parse(await readFile(join(root, 'frontend/package.json'), 'utf8'));
+const cargo = await readFile(join(root, 'frontend/src-tauri/Cargo.toml'), 'utf8');
+if (pkg.version !== version || cargo.match(/^version = "([^"]+)"/m)?.[1] !== version)
+  throw new Error('Package, Cargo and Tauri versions must match');
 const out = join(root, 'output', `desktop-${version}`);
 const changelog = await readFile(join(root, 'CHANGELOG.md'), 'utf8');
 const heading = `## 桌面版 ${version} —`;

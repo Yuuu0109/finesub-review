@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod updates;
+mod portable;
 
 fn main() {
     tauri::Builder::default()
@@ -9,7 +10,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::PendingUpdate::default())
-        .invoke_handler(tauri::generate_handler![updates::check_desktop_update, updates::download_desktop_update])
+        .invoke_handler(tauri::generate_handler![updates::check_desktop_update, updates::download_desktop_update, updates::apply_desktop_update, updates::save_desktop_update])
         .setup(|app| {
             tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
                 .title("FineSub 知识库审核")

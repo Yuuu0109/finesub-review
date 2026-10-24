@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main, feat/desktop]
-    paths: ["frontend/**", "scripts/package_desktop.mjs", ".github/workflows/desktop.yml"]
+    paths: ["frontend/**", "scripts/package_desktop.mjs", "scripts/verify_desktop.mjs", ".github/workflows/desktop.yml"]
   pull_request:
-    paths: ["frontend/**", "scripts/package_desktop.mjs", ".github/workflows/desktop.yml"]
+    paths: ["frontend/**", "scripts/package_desktop.mjs", "scripts/verify_desktop.mjs", ".github/workflows/desktop.yml"]
 permissions:
   contents: read
 jobs:
@@ -46,6 +46,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
       - run: node ../scripts/package_desktop.mjs
+        if: github.event_name != 'pull_request'
+      - run: node ../scripts/verify_desktop.mjs
         if: github.event_name != 'pull_request'
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
