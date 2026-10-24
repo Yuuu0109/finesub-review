@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 
 from . import compat
 from .db import AccessGate, AccessSession, Asset, Audit, Batch, Decision, Entry, ImportItem, Job, LoginSession, Notice, Release, Review, Revision, User, Workspace, init_db, now
@@ -316,7 +316,12 @@ def dashboard(user=Depends(current_user, scope='function'), db=Depends(db_sessio
 
 @app.get('/api/entries')
 def entries(q: str = '', status: str = '', category: str = '', batch_id: str = '', mine: bool = False,
+            reviewed: Literal['', 'yes', 'no'] = '', after: str = '', group_id: str = '',
             page: int = Query(1, ge=1), limit: int = Query(30, ge=1, le=100), user=Depends(current_user, scope='function'), db=Depends(db_session, scope='function')):
+    if after and page != 1:
+        # Both define a starting point; applying the offset after the cursor
+        # would silently skip items, so reject the mixture.
+        raise HTTPException(422, '游标翻页（after）不能与 page 同时使用')
     query = select(Revision, Entry).join(Entry, Entry.current_revision == Revision.id)
     if q:
         term = '%' + q.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
@@ -329,16 +334,28 @@ def entries(q: str = '', status: str = '', category: str = '', batch_id: str = '
         query = query.where(Revision.batch_id == batch_id)
     if mine:
         query = query.where(Entry.assignee_id == user.id)
+    if group_id:
+        query = query.where(Revision.group_id == group_id)
+    own_review = select(Review.id).where(Review.revision_id == Revision.id,
+                                       Review.author_id == user.id, Review.verdict != 'reply').exists()
+    if reviewed:
+        query = query.where(own_review if reviewed == 'yes' else ~own_review)
+    if after:
+        # The cursor remains valid after a decision, review or new revision removes
+        # the current item from the queue. Offset pagination would skip its successor.
+        cursor = require(db, Revision, after)
+        query = query.where(or_(Revision.created_at < cursor.created_at,
+                                and_(Revision.created_at == cursor.created_at, Revision.id > cursor.id)))
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     rows = db.execute(query.order_by(Revision.created_at.desc(), Revision.id).offset((page - 1) * limit).limit(limit)).all()
     ids = [r.id for r, e in rows]
     counts = dict(db.execute(select(Review.revision_id, func.count()).where(Review.revision_id.in_(ids), Review.verdict != 'reply').group_by(Review.revision_id)).all()) if ids else {}
-    published = {e.id: e.published_revision for e in db.scalars(select(Entry)).all()}
-    return {'total': total, 'page': page, 'items': [{**revision_view(r), 'assignee_id': e.assignee_id, 'review_count': counts.get(r.id, 0), 'published': published.get(e.id) == r.id} for r, e in rows]}
+    own_ids = set(db.scalars(select(Review.revision_id).where(Review.revision_id.in_(ids), Review.author_id == user.id, Review.verdict != 'reply')).all()) if ids else set()
+    return {'total': total, 'page': page, 'items': [{**revision_view(r), 'assignee_id': e.assignee_id, 'review_count': counts.get(r.id, 0), 'my_review': r.id in own_ids, 'published': e.published_revision == r.id} for r, e in rows]}
 
 
 @app.get('/api/entries/{entry_id}')
-def entry_detail(entry_id: str, revision_id: str = '', user=Depends(current_user, scope='function'), db=Depends(db_session, scope='function')):
+def entry_detail(entry_id: str, revision_id: str = '', compare_to: Literal['previous', 'published'] = 'previous', user=Depends(current_user, scope='function'), db=Depends(db_session, scope='function')):
     entry = require(db, Entry, entry_id)
     revision = require(db, Revision, revision_id or entry.current_revision)
     if revision.entry_id != entry.id:
@@ -347,17 +364,27 @@ def entry_detail(entry_id: str, revision_id: str = '', user=Depends(current_user
     records = db.scalars(select(Review).join(Revision, Review.revision_id == Revision.id).where(Revision.entry_id == entry.id).order_by(Review.created_at)).all()
     decisions = db.scalars(select(Decision).join(Revision, Decision.revision_id == Revision.id).where(Revision.entry_id == entry.id).order_by(Decision.created_at.desc())).all()
     people = {u.id: u.name for u in db.scalars(select(User)).all()}
-    old = db.get(Revision, revision.parent_id) if revision.parent_id else None
+    base_id = entry.published_revision if compare_to == 'published' else revision.parent_id
+    old = db.get(Revision, base_id) if base_id else None
+    related = db.scalars(select(Revision).join(Entry, Entry.current_revision == Revision.id).where(
+        Revision.group_id == revision.group_id, Revision.entry_id != entry.id)).all() if revision.group_id else []
     diff = list(difflib.unified_diff((old.content if old else '').splitlines(), revision.content.splitlines(), fromfile=f'v{old.number}' if old else '新词条', tofile=f'v{revision.number}', lineterm=''))
     warnings, errors = compat.validate(revision.path, revision.content, db.get(Workspace, 1).profile,
                                         baseline=compatibility_baseline(db, revision)) if revision.operation != 'delete' else ([], [])
     aliases = set(re.split(r'[,、，]', revision.aliases)) - {''}
-    for other in current_revisions(db):
-        if revision.category != 'style' and other.category != 'style' and other.entry_id != entry.id and aliases.intersection(set(re.split(r'[,、，]', other.aliases)) | {other.title}):
-            warnings.append(f'别名与「{other.title}」有重叠，请核实是否同一对象')
+    if aliases and revision.category != 'style':
+        # Narrow candidates in SQL, then confirm exact alias/title overlap.
+        overlap = db.scalars(select(Revision).join(Entry, Entry.current_revision == Revision.id).where(
+            Entry.id != entry.id, Revision.category != 'style',
+            or_(Revision.title.in_(aliases), *[Revision.aliases.contains(alias, autoescape=True) for alias in aliases]))).all()
+        for other in overlap:
+            if aliases.intersection(set(re.split(r'[,、，]', other.aliases)) | {other.title}):
+                warnings.append(f'别名与「{other.title}」有重叠，请核实是否同一对象')
     return {'entry': {**revision_view(revision), 'content': revision.content, 'current_revision': entry.current_revision, 'assignee_id': entry.assignee_id,
                       'published': entry.published_revision == revision.id},
             'versions': [revision_view(r) for r in versions], 'diff': diff, 'warnings': warnings, 'errors': errors,
+            'comparison': {'kind': compare_to, 'number': old.number if old else None, 'id': base_id},
+            'related': [revision_view(r) for r in related],
             'reviews': [{**{k: getattr(r, k) for k in ('id', 'revision_id', 'parent_id', 'verdict', 'body', 'quote', 'suggestion', 'evidence', 'resolution', 'resolution_note', 'created_at', 'author_id')},
                          'author': people.get(r.author_id, '已停用成员'), 'stale': r.revision_id != entry.current_revision} for r in records],
             'decisions': [{**{k: getattr(d, k) for k in ('revision_id', 'status', 'reason', 'created_at')}, 'author': people.get(d.author_id)} for d in decisions]}

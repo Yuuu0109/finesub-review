@@ -22,6 +22,7 @@ export type Entry = {
   path: string;
   operation: string;
   review_count: number;
+  my_review?: boolean;
   assignee_id: string | null;
   published: boolean;
   content?: string;
@@ -59,7 +60,10 @@ export type Detail = {
     author: string;
     created_at: string;
   }[];
+  comparison: { kind: "previous" | "published"; number: number | null; id: string | null };
+  related: Entry[];
 };
+export type ReleaseCandidate = Entry & { blockers: string[]; related: Entry[] };
 export type Batch = {
   id: string;
   name: string;

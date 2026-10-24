@@ -1,19 +1,24 @@
 <script setup lang="ts">
 import { scopedDraftKey } from "../transport";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { api, post, date, labels, type Detail, type RecordItem } from "../api";
 import { useApp } from "../context";
 import Icon from "../components/Icon.vue";
 import Markdown from "../components/Markdown.vue";
 import Diff from "../components/Diff.vue";
 import Modal from "../components/Modal.vue";
-const props = defineProps<{ entryId: string }>();
+import { nextParams, queueParams, readDraft, writeDraft, removeDraft } from "../workflow";
+const props = defineProps<{ entryId: string; queueQuery?: string }>();
 const { user, people, go, toast, refresh } = useApp();
 const detail = ref<Detail | null>(null),
   loading = ref(true),
   busy = ref(false),
   tab = ref("read"),
   showHistory = ref(false);
+const compareTo = ref<"previous" | "published">("previous");
+const queueFinished = ref(false), nextBusy = ref(false), continueReview = ref(true), draftWarning = ref(false);
+const queue = queueParams(props.queueQuery || "status=pending");
+let queueAnchor = "";
 const form = ref({
     verdict: "changes",
     body: "",
@@ -60,32 +65,87 @@ const editDraftKey = computed(
   () => scopedDraftKey(`finesub-edit:${user.value?.id}:${props.entryId}`),
 );
 const editStale = computed(() => editBaseRevision.value !== detail.value?.entry.id);
+const editDirty = computed(() => !!detail.value && isCurrent.value && (
+  editContent.value !== detail.value.entry.content || editSource.value !== detail.value.entry.source ||
+  deleteEntry.value !== (detail.value.entry.operation === "delete")
+));
+const diffCounts = computed(() => ({
+  added: detail.value?.diff.filter(l => l.startsWith('+') && !l.startsWith('+++')).length || 0,
+  removed: detail.value?.diff.filter(l => l.startsWith('-') && !l.startsWith('---')).length || 0,
+}));
+const decisionDraftKey = computed(() => scopedDraftKey(`finesub-decision:${user.value?.id}:${detail.value?.entry.id}`));
+// 草稿按 400ms 合并写入：大词条一次按键就 JSON.stringify 2MB 并同步写 localStorage 会卡顿。
+const pendingDrafts = new Map<string, unknown>();
+const writtenDrafts = new Map<string, string>();
+let draftTimer: ReturnType<typeof setTimeout> | null = null;
+function writeNow(key: string, value: unknown): boolean {
+  pendingDrafts.delete(key);
+  if (!pendingDrafts.size && draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+  const serialized = JSON.stringify(value);
+  if (writtenDrafts.get(key) === serialized) return true;
+  const ok = writeDraft(key, value);
+  if (ok) writtenDrafts.set(key, serialized);
+  else writtenDrafts.delete(key);
+  return ok;
+}
+function flushDrafts() {
+  if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+  if (!pendingDrafts.size) return;
+  const queued = [...pendingDrafts];
+  pendingDrafts.clear();
+  for (const [key, value] of queued) if (!writeNow(key, value)) draftWarning.value = true;
+}
+function persist(key: string, value: unknown, immediate = false) {
+  if (immediate) { if (!writeNow(key, value)) draftWarning.value = true; return; }
+  pendingDrafts.set(key, value);
+  if (draftTimer) clearTimeout(draftTimer);
+  draftTimer = setTimeout(flushDrafts, 400);
+}
+function dropDraft(key: string) {
+  pendingDrafts.delete(key);
+  writtenDrafts.delete(key);
+  removeDraft(key);
+}
+function backToQueue() { go(queue.get("mine") === "true" ? "mine" : "entries", "", queue.toString()); }
+function discardEdit() {
+  if (!detail.value || !window.confirm("丢弃未保存的正文修订，恢复当前版本？")) return;
+  restoring = true;
+  editContent.value = detail.value.entry.content; editSource.value = detail.value.entry.source;
+  editBaseRevision.value = detail.value.entry.id; deleteEntry.value = detail.value.entry.operation === "delete";
+  dropDraft(editDraftKey.value);
+  setTimeout(() => (restoring = false), 0);
+}
 let restoring = false;
+let sequence = 0;
 async function load(version = "") {
+  const request = ++sequence;
   loading.value = true;
   try {
     const d = await api<Detail>(
-      `/entries/${props.entryId}${version ? "?revision_id=" + version : ""}`,
+      `/entries/${props.entryId}?${new URLSearchParams({ revision_id: version, compare_to: compareTo.value })}`,
     );
+    if (request !== sequence) return;
+    if (!queueAnchor) { queueAnchor = d.entry.id; tab.value = d.entry.number > 1 ? "diff" : "read"; }
     restoring = true;
     detail.value = d;
     editContent.value = d.entry.content;
     editBaseRevision.value = d.entry.id;
     editSource.value = d.entry.source;
     deleteEntry.value = d.entry.operation === "delete";
-    const editDraft = d.entry.id === d.entry.current_revision ? sessionStorage.getItem(editDraftKey.value) : null;
-    if (editDraft) {
-      try {
-        const saved = JSON.parse(editDraft);
+    const saved = d.entry.id === d.entry.current_revision ? readDraft<{ content: string; baseRevision: string; source: string; deleteEntry: boolean }>(editDraftKey.value) : null;
+    if (saved && typeof saved.content === "string" && typeof saved.source === "string") {
         editContent.value = saved.content;
         editBaseRevision.value = saved.baseRevision || d.entry.id;
         editSource.value = saved.source;
-        deleteEntry.value = saved.deleteEntry;
-      } catch { sessionStorage.removeItem(editDraftKey.value); }
+        deleteEntry.value = !!saved.deleteEntry;
+        // Migrate old session drafts so an application update cannot discard them.
+        persist(editDraftKey.value, saved, true);
     }
-    const draft = sessionStorage.getItem(draftKey.value);
+    const draft = readDraft<typeof form.value>(draftKey.value);
     form.value = draft
-      ? JSON.parse(draft)
+      && ["approve", "changes", "reject", "evidence"].includes(draft.verdict)
+      && [draft.body, draft.quote, draft.suggestion, draft.evidence].every(v => typeof v === "string")
+      ? draft
       : {
           verdict: "changes",
           body: "",
@@ -93,30 +153,37 @@ async function load(version = "") {
           suggestion: "",
           evidence: "",
         };
+    if (draft) persist(draftKey.value, form.value, true);
+    const decisionDraft = readDraft<{ status: string; reason: string }>(decisionDraftKey.value);
+    decisionReason.value = typeof decisionDraft?.reason === "string" ? decisionDraft.reason : "";
+    decisionStatus.value = ["approved", "needs_changes", "rejected", "pending"].includes(decisionDraft?.status || "") ? decisionDraft!.status : "approved";
     setTimeout(() => (restoring = false), 0);
   } catch (e) {
     toast((e as Error).message, true);
   } finally {
-    loading.value = false;
+    if (request === sequence) loading.value = false;
   }
 }
 watch(
   [editContent, editSource, deleteEntry, editBaseRevision],
   () => {
     if (!restoring && detail.value && isCurrent.value)
-      sessionStorage.setItem(editDraftKey.value, JSON.stringify({
+      persist(editDraftKey.value, {
         content: editContent.value, baseRevision: editBaseRevision.value, source: editSource.value, deleteEntry: deleteEntry.value,
-      }));
+      });
   },
 );
 watch(
   form,
   () => {
     if (!restoring && detail.value)
-      sessionStorage.setItem(draftKey.value, JSON.stringify(form.value));
+      persist(draftKey.value, form.value);
   },
   { deep: true },
 );
+watch([decisionReason, decisionStatus], () => {
+  if (!restoring && detail.value && admin.value) persist(decisionDraftKey.value, { reason: decisionReason.value, status: decisionStatus.value });
+});
 async function act(fn: () => Promise<void>) {
   if (busy.value) return;
   busy.value = true;
@@ -129,7 +196,7 @@ async function act(fn: () => Promise<void>) {
     busy.value = false;
   }
 }
-function submitRecord() {
+function submitRecord(andNext = false) {
   if (!detail.value) return;
   act(async () => {
     const rid = detail.value!.entry.id;
@@ -137,12 +204,14 @@ function submitRecord() {
       ...form.value,
       revision_id: rid,
     });
-    sessionStorage.removeItem(draftKey.value);
+    dropDraft(draftKey.value);
     await load(rid);
-    toast("审核记录已提交，最终决定由管理员作出");
+    toast("审核记录已提交");
+    if (andNext) await next();
   });
 }
 function submitDecision() {
+  if (editDirty.value || !isCurrent.value) return;
   act(async () => {
     await post(`/entries/${props.entryId}/decision`, {
       revision_id: detail.value!.entry.id,
@@ -150,9 +219,10 @@ function submitDecision() {
       reason: decisionReason.value,
     });
     decisionOpen.value = false;
-    decisionReason.value = "";
+    dropDraft(decisionDraftKey.value);
     await load();
     toast("管理员决定已保存");
+    if (continueReview.value) await next();
   });
 }
 function saveRevision() {
@@ -163,10 +233,10 @@ function saveRevision() {
       source: editSource.value,
       operation: deleteEntry.value ? "delete" : "upsert",
     });
-    sessionStorage.removeItem(editDraftKey.value);
+    dropDraft(editDraftKey.value);
     tab.value = "diff";
     await load();
-    toast("已生成新的待裁决版本，旧审核记录已保留");
+    toast("新版本已保存");
   });
 }
 function submitReply() {
@@ -213,19 +283,48 @@ function quoteSelection() {
   if (selection && detail.value?.entry.content.includes(selection)) {
     form.value.quote = selection;
     toast("已引用所选文字");
-  } else toast("请先在正文中选中要讨论的原文", true);
+    document.getElementById("review-body")?.focus();
+  } else toast("请先选中原文", true);
 }
 async function next() {
+  if (nextBusy.value) return;
+  nextBusy.value = true;
   try {
-    const data = await api("/entries?status=pending&limit=100");
-    const other = data.items.find((e: any) => e.entry_id !== props.entryId);
-    if (other) go("review", other.entry_id);
-    else toast("当前没有其他待裁决的词条");
+    const data = await api<{ items: { entry_id: string }[] }>("/entries?" + nextParams(queue.toString(), queueAnchor));
+    const other = data.items[0];
+    if (other) go("review", other.entry_id, queue.toString());
+    else queueFinished.value = true;
   } catch (e) {
     toast((e as Error).message, true);
-  }
+  } finally { nextBusy.value = false; }
 }
-onMounted(() => load());
+async function changeComparison() {
+  if (!detail.value) return;
+  // Refresh only the diff: comparison must never reset an in-progress draft.
+  const id = detail.value.entry.id;
+  const requested = compareTo.value;
+  try {
+    const d = await api<Detail>(`/entries/${props.entryId}?revision_id=${id}&compare_to=${requested}`);
+    if (detail.value?.entry.id === id && compareTo.value === requested) {
+      detail.value.diff = d.diff; detail.value.comparison = d.comparison;
+    }
+  } catch (e) { toast((e as Error).message, true); }
+}
+function beforeUpdate(event: Event) {
+  if (busy.value || nextBusy.value || loading.value) { event.preventDefault(); return; }
+  if (!detail.value) return;
+  // 页面切换前必须同步落盘，不能用防抖队列。
+  const ok = writeNow(draftKey.value, form.value);
+  const editOk = !editDirty.value || writeNow(editDraftKey.value, { content: editContent.value, source: editSource.value, baseRevision: editBaseRevision.value, deleteEntry: deleteEntry.value });
+  const decisionOk = !admin.value || writeNow(decisionDraftKey.value, { reason: decisionReason.value, status: decisionStatus.value });
+  if (!ok || !editOk || !decisionOk) { draftWarning.value = true; event.preventDefault(); }
+}
+onMounted(() => { load(); window.addEventListener('desktop-before-update', beforeUpdate); });
+onUnmounted(() => {
+  flushDrafts();
+  sequence++;
+  window.removeEventListener('desktop-before-update', beforeUpdate);
+});
 </script>
 <template>
   <div v-if="loading && !detail" class="loading-state">
@@ -233,15 +332,15 @@ onMounted(() => load());
   </div>
   <template v-if="detail"
     ><div class="review-top">
-      <button class="text-button muted" @click="go('entries')">
-        <Icon name="back" :size="16" />知识库
+      <button class="text-button muted" @click="backToQueue">
+        <Icon name="back" :size="16" />返回审核队列
       </button>
       <div class="review-top-actions">
         <span class="muted"
           >{{ labels[detail.entry.category] }} /
           {{ detail.entry.path.split("/").pop() }}</span
-        ><button class="button small" @click="next">
-          下一条待审<Icon name="arrow" :size="15" />
+        ><button class="button small" :disabled="loading || nextBusy || busy" @click="next">
+          下一条<Icon name="arrow" :size="15" />
         </button>
       </div>
     </div>
@@ -267,8 +366,21 @@ onMounted(() => load());
         labels[detail.entry.status]
       }}</span>
     </div>
-    <div class="review-grid">
-      <aside class="review-directory">
+    <div v-if="queueFinished" class="queue-complete" role="status">
+      <Icon name="check" :size="20" /><strong>已到当前队列末尾</strong>
+      <button class="button small" @click="backToQueue">返回队列</button>
+      <button v-if="admin" class="button primary small" @click="go('releases')">前往发布</button>
+    </div>
+    <p v-if="draftWarning" class="form-error" role="alert">草稿保存失败，请复制未保存内容。</p>
+    <div class="review-stage" aria-label="当前版本进度">
+      <span><i></i>候选 v{{ detail.entry.number }}</span>
+      <Icon name="chevron" :size="14" />
+      <span :class="detail.entry.status"><i></i>{{ labels[detail.entry.status] }}</span>
+      <Icon name="chevron" :size="14" />
+      <span :class="{ approved: detail.entry.published }"><i></i>{{ detail.entry.published ? '已发布' : '尚未发布' }}</span>
+      <span v-if="editDirty" class="draft-indicator">{{ draftWarning ? '修订草稿未保存' : '修订草稿已保留' }}</span>
+    </div>
+      <details class="review-metadata"><summary>来源、负责人和版本历史</summary><div class="review-directory">
         <div class="directory-section">
           <h3>词条信息</h3>
           <dl>
@@ -341,7 +453,9 @@ onMounted(() => load());
           <h3>来源</h3>
           <p class="source-text">{{ detail.entry.source || "尚未补充来源" }}</p>
         </div>
-      </aside>
+      </div></details>
+    <div class="review-grid">
+
       <section class="document-panel panel">
         <div class="document-toolbar">
           <div class="tabs">
@@ -370,8 +484,16 @@ onMounted(() => load());
             <Icon name="message" :size="17" />
           </button>
         </div>
+        <div v-if="tab === 'diff'" class="diff-summary">
+          <label>对比<select v-model="compareTo" aria-label="对比版本" :disabled="loading" @change="changeComparison"><option value="previous">上一版本</option><option value="published">当前正式版本</option></select></label>
+          <span>{{ detail.comparison.number ? `v${detail.comparison.number}` : '无基线' }} → v{{ detail.entry.number }}</span>
+          <span class="diff-totals"><b class="green-text">+{{ diffCounts.added }}</b><b class="red-text">−{{ diffCounts.removed }}</b></span>
+        </div>
+        <div v-if="editDirty && tab !== 'edit'" class="draft-banner">
+          <span>正文修订未保存</span><button class="text-button" @click="tab = 'edit'">继续修订</button>
+        </div>
         <div v-if="detail.errors.length" class="validation-box error">
-          <strong>发布前需要修正</strong>
+          <strong>格式错误</strong>
           <p v-for="item in detail.errors" :key="item">{{ item }}</p>
         </div>
         <details v-if="detail.warnings.length" class="validation-box">
@@ -386,16 +508,10 @@ onMounted(() => load());
           detail.entry.content
         }}</pre>
         <form v-else class="edit-form" @submit.prevent="saveRevision">
-          <p v-if="detail.warnings.some(w => w.startsWith('历史正文定点兼容'))" class="callout">
-            旧知识可保留原章节，修订简介或现有节点的值。新增、删除、重排节点及修改名称、别名等匹配字段需单独整理；无法可靠兼容时会保留草稿并说明原因。
-          </p>
-          <p class="callout">
-            保存将产生新的待裁决版本。历史正文与成员记录会完整保留。
-          </p>
           <div v-if="editStale" class="callout">
-            草稿基于旧版本，已保留。请先查看最新正文并手动合并，再继续修订。
+            草稿版本已过期，请合并最新正文。
             <button type="button" class="text-button" @click="editBaseRevision = detail.entry.id">
-              已对照当前版本，保留草稿继续修订
+              已合并，继续修订
             </button>
           </div>
           <label
@@ -415,19 +531,20 @@ onMounted(() => load());
             ><input
               v-model="deleteEntry"
               type="checkbox"
-            />将此修订标记为删除提案</label
+            />删除提案</label
           >
           <p v-if="deleteEntry" class="form-error">
-            只有此提案获管理员通过并发布后，正式知识库才会移除此词条。
+            通过并发布后删除此词条。
           </p>
-          <button class="button primary" :disabled="busy || editStale">保存为新版本</button>
+          <div class="heading-actions"><button class="button primary" :disabled="busy || editStale || !editDirty">保存为新版本</button>
+          <button type="button" class="button" :disabled="busy" @click="discardEdit">丢弃草稿</button></div>
         </form>
       </section>
       <aside class="review-sidebar">
         <section class="decision-panel">
           <div class="section-label">
             <Icon name="shield" :size="17" />
-            <h2>管理员最终决定</h2>
+            <h2>{{ admin ? '版本裁决' : '管理员决定' }}</h2>
           </div>
           <div class="decision-status">
             <span class="badge" :class="detail.entry.status">{{
@@ -442,17 +559,20 @@ onMounted(() => load());
               {{ date(latestDecision.created_at) }}</small
             >
           </p>
-          <p v-else class="muted small-text">
-            暂无最终决定。成员提交的审核记录仅供管理员参考。
-          </p>
           <button
             v-if="admin && isCurrent && !detail.entry.published"
             class="button primary full"
-            :disabled="busy"
+            :disabled="busy || loading || editDirty"
             @click="decisionOpen = true"
           >
-            作出管理员决定<Icon name="arrow" :size="16" />
+            作出决定<Icon name="arrow" :size="16" />
           </button>
+          <p v-if="admin && editDirty" class="small-text muted">正文修订未保存</p>
+          <button v-if="admin && detail.entry.status === 'approved' && !detail.entry.published" class="button full" @click="go('releases')">前往发布 <Icon name="arrow" :size="16" /></button>
+          <div v-if="detail.related.length" class="related-entries">
+            <h3>关联变更 · {{ detail.related.length + 1 }}</h3>
+            <button v-for="item in detail.related" :key="item.id" class="text-button" @click="go('review', item.entry_id, 'group_id=' + detail.entry.group_id)"><span>{{ item.title }}</span><small>{{ labels[item.status] }}</small></button>
+          </div>
         </section>
         <section class="records-panel">
           <div class="section-label">
@@ -460,7 +580,6 @@ onMounted(() => load());
             <h2>成员审核记录</h2>
             <span class="count-chip">{{ currentRecords.length }}</span>
           </div>
-          <p class="muted small-text">意见会被记录，不会自动通过或驳回词条。</p>
           <label class="checkbox-label history-toggle"
             ><input
               v-model="showHistory"
@@ -468,7 +587,7 @@ onMounted(() => load());
             />包含其他版本的记录</label
           >
           <div v-if="!roots.length" class="record-empty">
-            还没有审核记录。<br />可以在下方留下你的判断和依据。
+            暂无审核记录
           </div>
           <article v-for="record in roots" :key="record.id" class="record">
             <div class="record-header">
@@ -528,7 +647,7 @@ onMounted(() => load());
               <small>{{ date(reply.created_at) }}</small>
             </div>
           </article>
-          <form class="record-form" @submit.prevent="submitRecord">
+          <form class="record-form" @submit.prevent="submitRecord()">
             <h3>提交审核记录</h3>
             <label
               >你的判断<select v-model="form.verdict">
@@ -539,11 +658,12 @@ onMounted(() => load());
               </select></label
             ><label
               >意见说明<textarea
+                id="review-body"
                 v-model="form.body"
                 rows="4"
                 required
                 maxlength="15000"
-                placeholder="具体哪里需要确认？请说明你的理由。"
+                placeholder="审核意见"
               ></textarea>
             </label>
             <details :open="!!form.quote">
@@ -552,13 +672,13 @@ onMounted(() => load());
                 >引用原文<textarea
                   v-model="form.quote"
                   rows="2"
-                  placeholder="粘贴当前版本中的文字"
+                  placeholder="引用原文"
                 ></textarea></label
               ><label
                 >建议替换为<textarea
                   v-model="form.suggestion"
                   rows="3"
-                  placeholder="仅作为建议，不直接修改正文"
+                  placeholder="建议文本"
                 ></textarea>
               </label>
             </details>
@@ -566,16 +686,17 @@ onMounted(() => load());
               >依据（选填）<textarea
                 v-model="form.evidence"
                 rows="2"
-                placeholder="例如：第 20 期，12:34，日文原句或来源链接"
+                placeholder="节目期数 / 时间码 / 来源链接"
               ></textarea>
             </label>
             <div class="record-submit">
-              <small>记录将关联 v{{ detail.entry.number }}</small
-              ><button
-                class="button primary"
+              <small>v{{ detail.entry.number }}</small>
+              <button class="button" :disabled="busy || !form.body.trim()">提交记录</button>
+              <button type="button" class="button primary"
                 :disabled="busy || !form.body.trim()"
+                @click="submitRecord(true)"
               >
-                提交记录
+                提交并继续
               </button>
             </div>
           </form>
@@ -590,17 +711,14 @@ onMounted(() => load());
   <Modal
     v-if="decisionOpen"
     title="管理员最终决定"
-    @close="decisionOpen = false"
+    @close="!busy && (decisionOpen = false)"
     ><form @submit.prevent="submitDecision">
       <p class="callout">
-        针对「{{ detail?.entry.title }}」v{{
-          detail?.entry.number
-        }}
-        作出决定。成员意见数量不限制你的决定。
+        {{ detail?.entry.title }} · v{{ detail?.entry.number }}
       </p>
       <label
         >决定<select v-model="decisionStatus">
-          <option value="approved">通过，等待发布</option>
+          <option value="approved" :disabled="!!detail?.errors.length">通过，等待发布</option>
           <option value="needs_changes">待补充 / 需修改</option>
           <option value="rejected">驳回</option>
           <option value="pending">重新进入待裁决</option>
@@ -610,13 +728,15 @@ onMounted(() => load());
           v-model="decisionReason"
           required
           rows="4"
-          placeholder="说明采纳的依据或需要补充的内容"
+          placeholder="决定理由"
         ></textarea>
       </label>
+      <p v-if="detail?.errors.length" class="form-error">格式校验未通过</p>
+      <label class="checkbox-label"><input v-model="continueReview" type="checkbox" />继续审核下一条</label>
       <div class="modal-actions">
         <button type="button" class="button" @click="decisionOpen = false">
           取消</button
-        ><button class="button primary" :disabled="busy">确认决定</button>
+        ><button class="button primary" :disabled="busy || !decisionReason.trim() || (decisionStatus === 'approved' && !!detail?.errors.length)">{{ continueReview ? '确认并继续' : '确认决定' }}</button>
       </div>
     </form></Modal
   >
@@ -628,7 +748,7 @@ onMounted(() => load());
           v-model="replyText"
           required
           rows="4"
-          placeholder="补充你的说明"
+          placeholder="回复内容"
         ></textarea>
       </label>
       <div class="modal-actions">
@@ -652,12 +772,9 @@ onMounted(() => load());
           v-model="resolutionNote"
           required
           rows="4"
-          placeholder="记录采纳方式或不采纳的理由"
+          placeholder="处理理由"
         ></textarea>
       </label>
-      <p class="muted small-text">
-        采纳标记不会修改正文；需要更新知识时，请到“修订”页保存新版本。
-      </p>
       <div class="modal-actions">
         <button class="button primary" :disabled="busy">保存处理结果</button>
       </div>

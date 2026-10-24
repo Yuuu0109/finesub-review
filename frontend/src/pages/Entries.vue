@@ -1,43 +1,56 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import { api, date, labels, type Entry } from "../api";
 import { useApp } from "../context";
 import Icon from "../components/Icon.vue";
+import { queueParams } from "../workflow";
 const props = defineProps<{
   mine?: boolean;
   search?: string;
   initialStatus?: string;
+  initialQuery?: string;
 }>();
-const { go, toast, people } = useApp();
+const { go, toast, people, user } = useApp();
+const initial = queueParams(props.initialQuery);
 const rows = ref<Entry[]>([]),
-  query = ref(props.search || ""),
+  query = ref(initial.get("q") || props.search || ""),
   status = ref(
     ["pending", "needs_changes", "approved", "rejected"].includes(
-      props.initialStatus || "",
+      initial.get("status") || props.initialStatus || "",
     )
-      ? props.initialStatus!
+      ? initial.get("status") || props.initialStatus!
       : "",
   ),
-  category = ref(""),
-  page = ref(1),
+  category = ref(initial.get("category") || ""),
+  reviewed = ref(initial.get("reviewed") || ""),
+  page = ref(Math.max(1, Number(initial.get("page")) || 1)),
   total = ref(0),
   loading = ref(false);
 let sequence = 0;
+function params() {
+  const p = new URLSearchParams(initial);
+  for (const [key, value] of Object.entries({ q: query.value, status: status.value,
+    category: category.value, reviewed: reviewed.value, mine: props.mine || initial.get("mine") === "true" ? "true" : "", page: String(page.value) })) {
+    if (value) p.set(key, value); else p.delete(key);
+  }
+  return p;
+}
+function openEntry(entry: Entry) { go("review", entry.entry_id, params().toString()); }
+function resetFilters() {
+  query.value = ""; status.value = ""; category.value = ""; reviewed.value = "";
+  for (const key of ["batch_id", "group_id", "mine"]) initial.delete(key);
+  filter();
+}
 async function load() {
   const current = ++sequence;
   loading.value = true;
   try {
-    const p = new URLSearchParams({
-      q: query.value,
-      status: status.value,
-      category: category.value,
-      mine: String(!!props.mine),
-      page: String(page.value),
-    });
+    const p = params();
     const data = await api("/entries?" + p);
     if (current === sequence) {
       rows.value = data.items;
       total.value = data.total;
+      history.replaceState(null, "", `#/${props.mine ? "mine" : "entries"}?${p}`);
     }
   } catch (e) {
     toast((e as Error).message, true);
@@ -57,15 +70,31 @@ watch(
   },
 );
 onMounted(load);
+onUnmounted(() => { sequence++; });
 </script>
 <template>
   <div class="page-heading">
     <div>
       <h1>{{ mine ? "我的审核" : "知识库" }}</h1>
+      <p v-if="initial.get('batch_id')">当前导入批次</p>
+      <p v-else-if="initial.get('group_id')">关联变更组</p>
     </div>
-    <button class="button" @click="load">
+    <div class="heading-actions">
+    <button v-if="rows.length" class="button primary" :disabled="loading" @click="openEntry(rows[0]!)">
+      <Icon name="arrow" :size="17" />开始审核
+    </button>
+    <button class="button" :disabled="loading" @click="load">
       <Icon name="refresh" :size="17" />刷新
     </button>
+    </div>
+  </div>
+  <div class="queue-tabs" aria-label="快捷审核筛选">
+    <button :class="{ active: !status && !reviewed }" @click="status = ''; reviewed = ''; filter()">全部</button>
+    <button :class="{ active: status === 'pending' && !reviewed }" @click="status = 'pending'; reviewed = ''; filter()">待裁决</button>
+    <button :class="{ active: reviewed === 'no' }" @click="status = 'pending'; reviewed = 'no'; filter()">我未审核</button>
+    <button :class="{ active: status === 'needs_changes' }" @click="status = 'needs_changes'; reviewed = ''; filter()">待补充</button>
+    <span>{{ total }} 条</span>
+    <button v-if="user?.role === 'admin'" class="queue-publish" @click="go('releases')">发布已通过知识 <Icon name="arrow" :size="14" /></button>
   </div>
   <section class="panel">
     <form class="filter-bar" @submit.prevent="filter">
@@ -88,8 +117,8 @@ onMounted(load);
         <option value="needs_changes">待补充</option>
         <option value="approved">已通过</option>
         <option value="rejected">已驳回</option></select
-      ><button class="button" type="submit">查询</button
-      ><span class="filter-count">{{ total }} 条知识</span>
+      ><button class="button" type="submit">查询</button>
+      <button type="button" class="text-button muted" @click="resetFilters">清除筛选</button>
     </form>
     <div class="table-scroll">
       <table>
@@ -107,7 +136,7 @@ onMounted(load);
         <tbody>
           <tr v-for="entry in rows" :key="entry.id">
             <td>
-              <button class="table-title" @click="go('review', entry.entry_id)">
+              <button class="table-title" @click="openEntry(entry)">
                 {{ entry.title
                 }}<span
                   v-if="entry.operation === 'delete'"
@@ -135,6 +164,7 @@ onMounted(load);
                   entry.review_count
                 }}</span
               >
+              <small v-if="entry.my_review" class="cell-note green-text">我已审核</small>
             </td>
             <td>
               {{
@@ -143,8 +173,8 @@ onMounted(load);
             </td>
             <td class="nowrap muted">{{ date(entry.created_at) }}</td>
             <td>
-              <button class="text-button" @click="go('review', entry.entry_id)">
-                查看<Icon name="chevron" :size="14" />
+              <button class="text-button" @click="openEntry(entry)">
+                审核<Icon name="chevron" :size="14" />
               </button>
             </td>
           </tr>
@@ -154,13 +184,6 @@ onMounted(load);
     <div v-if="!rows.length && !loading" class="empty-state">
       <Icon name="search" :size="32" />
       <h3>没有找到匹配的知识</h3>
-      <p>
-        {{
-          mine
-            ? "可以在知识库中认领任务，或等待管理员分配。"
-            : "调整筛选条件，或导入一个新的知识库批次。"
-        }}
-      </p>
     </div>
     <div v-if="loading" class="loading-inline">正在读取…</div>
     <div class="pagination">

@@ -4,7 +4,7 @@ export type AppContext = {
   user: Ref<User | null>;
   people: Ref<User[]>;
   settings: Ref<any>;
-  go: (page: string, id?: string) => void;
+  go: (page: string, id?: string, query?: string) => void;
   toast: (message: string, error?: boolean) => void;
   refresh: () => Promise<void>;
 };

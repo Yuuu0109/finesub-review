@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import "./style.css";
+import "./workflow.css";
 import { desktop } from "./transport";
 if (desktop) {
   document.addEventListener("click", (event) => {
@@ -15,12 +16,20 @@ if (desktop) {
     }
   });
 }
-(desktop ? import("./DesktopRoot.vue") : import("./App.vue"))
-  .then(({ default: App }) => createApp(App).mount("#app"))
-  .catch(() => {
+async function mountApp() {
+  // Separate branches keep Vite's CSS preload attached to the correct entry.
+  if (desktop) {
+    const { default: DesktopRoot } = await import("./DesktopRoot.vue");
+    createApp(DesktopRoot).mount("#app");
+  } else {
+    const { default: App } = await import("./App.vue");
+    createApp(App).mount("#app");
+  }
+}
+mountApp().catch(() => {
     const root = document.getElementById("app");
     if (root) {
       root.setAttribute("role", "alert");
       root.textContent = "页面资源加载失败，请按 Ctrl+F5 刷新后重试。";
     }
-  });
+});

@@ -34,8 +34,10 @@ const toastMessage = ref(""),
   toastError = ref(false);
 let toastTimer: ReturnType<typeof setTimeout>,
   poll: ReturnType<typeof setInterval>;
-const page = computed(() => route.value.split("/")[0] || "dashboard"),
-  selectedId = computed(() => route.value.split("/")[1] || "");
+const routePath = computed(() => route.value.split("?")[0] || "dashboard");
+const routeQuery = computed(() => route.value.split("?").slice(1).join("?"));
+const page = computed(() => routePath.value.split("/")[0] || "dashboard"),
+  selectedId = computed(() => routePath.value.split("/")[1] || "");
 const nav = [
   { id: "dashboard", label: "工作台", icon: "grid" },
   { id: "entries", label: "知识库", icon: "book" },
@@ -60,8 +62,8 @@ function toast(message: string, error = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (toastMessage.value = ""), 5500);
 }
-function go(target: string, id?: string) {
-  location.hash = "/" + target + (id ? "/" + id : "");
+function go(target: string, id?: string, query?: string) {
+  location.hash = "/" + target + (id ? "/" + id : "") + (query ? "?" + query : "");
   sidebar.value = false;
 }
 function hashChanged() {
@@ -376,10 +378,12 @@ onUnmounted(() => {
           :mine="page === 'mine'"
           :search="globalSearch"
           :initial-status="page === 'entries' ? selectedId : ''"
+          :initial-query="routeQuery"
         /><ReviewPage
           v-else-if="page === 'review'"
           :key="selectedId"
           :entry-id="selectedId"
+          :queue-query="routeQuery"
         /><Streamer
           v-else-if="page === 'streamer'"
           :key="selectedId"
@@ -437,7 +441,7 @@ onUnmounted(() => {
           </button>
         </div>
       </form>
-      <p v-else class="callout">尚未创建管理员，请先完成管理员初始化。</p>
+      <p v-else class="callout">管理员尚未初始化</p>
     </Modal>
     <Modal v-if="noticeOpen" title="通知" @close="noticeOpen = false"
       ><div class="toolbar">
