@@ -2,6 +2,10 @@
 import os
 from pathlib import Path
 
+# Native FineSub subprocesses emit Chinese validation messages on Windows too.
+os.environ['PYTHONUTF8'] = '1'
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+
 ROOT = Path(__file__).resolve().parents[2]
 os.environ['REVIEW_DATA_DIR'] = str(ROOT / 'test-results' / 'db')
 test_url = os.environ.get('TEST_DATABASE_URL')

@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app import compat
-from app.db import AccessGate, AccessSession, Base, Batch, Entry, ImportItem, Job, LoginSession, Release, Review, Revision, Session, User, engine, init_db
+from app.db import AccessGate, AccessSession, Audit, Base, Batch, Entry, ImportItem, Job, LoginSession, Release, Review, Revision, Session, User, engine, init_db
 from app.main import app
 from app.security import hash_password
 from app.worker import run_once
@@ -108,6 +108,16 @@ def test_member_records_never_decide_and_admin_needs_no_votes():
     assert new['review_count'] == 0
     approve(a, new)
     assert latest(a)['status'] == 'approved'
+
+
+def test_decision_audit_reason_is_truncated_to_500_characters():
+    a = client()
+    upload(a)
+    entry = latest(a)
+    assert a.post(f'/api/entries/{entry["entry_id"]}/decision', json={'revision_id': entry['id'], 'status': 'rejected', 'reason': '证' * 600}).status_code == 200
+    with Session() as db:
+        record = db.scalar(select(Audit).where(Audit.action == 'review.decide').order_by(Audit.created_at.desc()))
+        assert len(record.detail['reason']) == 500
 
 
 def test_member_cannot_import_edit_decide_publish_manage_or_download():
@@ -324,6 +334,167 @@ def test_jsonl_dependent_group_cannot_be_partially_published():
         approve(a, row)
     assert a.post('/api/releases', json={'name': '部分发布', 'revision_ids': [rows[0]['id']]}).status_code == 409
     publish(a, rows)
+
+
+def test_init_db_recreates_indexes_missing_from_an_existing_database():
+    from sqlalchemy import inspect
+    # create_all skips tables that already exist, so an older database never gets
+    # indexes added to the models later unless init_db creates them itself.
+    with engine.begin() as connection:
+        connection.exec_driver_sql('DROP INDEX ix_revisions_status')
+        connection.exec_driver_sql('DROP INDEX ix_entries_assignee_id')
+    init_db()
+    init_db()
+    with engine.connect() as connection:
+        revisions = {index['name'] for index in inspect(connection).get_indexes('revisions')}
+        entries = {index['name'] for index in inspect(connection).get_indexes('entries')}
+    assert 'ix_revisions_status' in revisions and 'ix_revisions_created_at' in revisions
+    assert 'ix_entries_assignee_id' in entries
+
+
+def _legacy_ddl(omitted):
+    """CREATE TABLE statements matching today's models minus `omitted` columns.
+
+    Built from the metadata so the old database is realistic: every NOT NULL
+    column without a default is present, and only the named columns are missing.
+    """
+    from app.db import Base
+    statements = []
+    for table in Base.metadata.sorted_tables:
+        keep = [column for column in table.columns if f'{table.name}.{column.name}' not in omitted]
+        parts = []
+        for column in keep:
+            part = f'{column.name} {column.type.compile(dialect=engine.dialect)}'
+            if column.primary_key:
+                part += ' PRIMARY KEY'
+            elif not column.nullable:
+                part += ' NOT NULL'
+            parts.append(part)
+        statements.append(f'CREATE TABLE {table.name} ({", ".join(parts)})')
+    return statements
+
+
+def test_schema_sync_adds_columns_missing_from_an_existing_database(tmp_path):
+    import sqlite3
+    from sqlalchemy import create_engine, inspect
+    from app.db import _sync_schema
+    # A database from before the model gained these columns. create_all never
+    # adds columns to a table that already exists, and the old hand-written
+    # ALTER whitelist silently missed assignee_id and group_id: the database
+    # looked healthy until the first query failed with "no such column".
+    legacy = tmp_path / 'legacy.db'
+    raw = sqlite3.connect(legacy)
+    for statement in _legacy_ddl({'entries.assignee_id', 'revisions.group_id', 'releases.changes'}):
+        raw.execute(statement)
+    raw.commit()
+    raw.close()
+    old = create_engine(f'sqlite:///{legacy}')
+    with old.begin() as connection:
+        _sync_schema(connection)
+        _sync_schema(connection)
+    with old.connect() as connection:
+        entries = {column['name'] for column in inspect(connection).get_columns('entries')}
+        revisions = {column['name'] for column in inspect(connection).get_columns('revisions')}
+        releases = {column['name'] for column in inspect(connection).get_columns('releases')}
+        indexes = {index['name'] for index in inspect(connection).get_indexes('entries')}
+    assert {'published_revision', 'assignee_id'} <= entries
+    assert 'group_id' in revisions
+    # NOT NULL column whose only default is a Python-side empty container.
+    assert 'changes' in releases
+    assert 'ix_entries_assignee_id' in indexes
+
+
+def test_schema_sync_refuses_to_start_with_columns_it_cannot_add(tmp_path, monkeypatch):
+    import sqlite3
+    from sqlalchemy import create_engine, inspect
+    from app.db import SchemaOutOfDate, _sync_schema
+    # `revisions.content` is NOT NULL with no literal default: guessing one would
+    # corrupt data, so startup must fail loudly instead of leaving a database
+    # that looks fine until the first query raises "no such column".
+    legacy = tmp_path / 'partial.db'
+    raw = sqlite3.connect(legacy)
+    for statement in _legacy_ddl({'revisions.content'}):
+        raw.execute(statement)
+    raw.commit()
+    raw.close()
+    old = create_engine(f'sqlite:///{legacy}')
+    with pytest.raises(SchemaOutOfDate) as excinfo:
+        with old.begin() as connection:
+            _sync_schema(connection)
+    assert 'revisions.content' in str(excinfo.value)
+    # The escape hatch for a hand migration, without hiding the problem.
+    monkeypatch.setenv('REVIEW_ALLOW_PARTIAL_SCHEMA', '1')
+    with old.begin() as connection:
+        _sync_schema(connection)
+    with old.connect() as connection:
+        assert 'content' not in {column['name'] for column in inspect(connection).get_columns('revisions')}
+
+
+def test_schema_lock_path_follows_the_database_not_the_data_dir(tmp_path, monkeypatch):
+    import sqlite3
+    import subprocess
+    import sys
+    # The lock must sit beside the database file. Deriving it from
+    # REVIEW_DATA_DIR means a database configured elsewhere is not serialized.
+    database = tmp_path / 'elsewhere'
+    database.mkdir()
+    path = database / 'review.db'
+    env = dict(os.environ, DATABASE_URL=f'sqlite:///{path}', REVIEW_DATA_DIR=str(tmp_path / 'unrelated'))
+    procs = [subprocess.Popen([sys.executable, '-c', 'from app.db import init_db; init_db()'],
+                              cwd=str(ROOT / 'backend'), env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(4)]
+    results = [proc.wait(timeout=120) for proc in procs]
+    assert results == [0, 0, 0, 0]
+    assert (database / '.schema-init.lock').exists()
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute('SELECT id FROM workspace').fetchall() == [(1,)]
+    finally:
+        connection.close()
+
+
+def test_concurrent_startup_on_a_fresh_sqlite_database_all_succeed(tmp_path):
+    import sqlite3
+    import subprocess
+    import sys
+    # API and a hand-started worker can open the same new SQLite file together.
+    # Without serialization each process fails with "table ... already exists",
+    # or retries until SQLite's 30s lock timeout stalls startup.
+    path = tmp_path / 'fresh.db'
+    env = dict(os.environ, DATABASE_URL=f'sqlite:///{path}', REVIEW_DATA_DIR=str(tmp_path))
+    procs = [subprocess.Popen([sys.executable, '-c', 'from app.db import init_db; init_db()'],
+                              cwd=str(ROOT / 'backend'), env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(4)]
+    results = [(proc.wait(timeout=120), proc.communicate()[1][-300:]) for proc in procs]
+    assert [code for code, _ in results] == [0, 0, 0, 0], results
+    connection = sqlite3.connect(path)
+    try:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        workspace = connection.execute('SELECT id FROM workspace').fetchall()
+        indexes = connection.execute("SELECT count(*) FROM sqlite_master WHERE type='index' AND name LIKE 'ix_%'").fetchone()[0]
+    finally:
+        connection.close()
+    assert {'entries', 'revisions', 'releases', 'workspace'} <= tables
+    assert workspace == [(1,)]
+    assert indexes >= 14
+
+
+def test_run_once_with_a_job_id_runs_only_that_job_and_reports_losing_the_claim():
+    a = client()
+    payload = compat.make_zip({'common/甲.md': document('甲')})
+    first = a.post('/api/imports', data={'name': '批一'}, files={'files': ('a.zip', payload)}).json()['id']
+    second = a.post('/api/imports', data={'name': '批二'}, files={'files': ('b.zip', payload)}).json()['id']
+    with Session() as db:
+        first_job = db.scalar(select(Job).where(Job.target_id == first)).id
+        second_job = db.scalar(select(Job).where(Job.target_id == second)).id
+    # Naming the later job must not consume the earlier queued one.
+    assert run_once(second_job) is True
+    with Session() as db:
+        assert db.get(Job, second_job).status == 'done'
+        assert db.get(Job, first_job).status == 'queued'
+    # Re-running an already claimed job reports that this call did no work.
+    assert run_once(second_job) is False
+    assert run_once(first_job) is True
 
 
 def test_worker_recovers_abandoned_job_and_keeps_results_unique():
