@@ -6,6 +6,7 @@ import Icon from "../components/Icon.vue";
 import Modal from "../components/Modal.vue";
 import Diff from "../components/Diff.vue";
 import DownloadLink from "../components/DownloadLink.vue";
+import { toggleGroup } from "../workflow";
 const props = defineProps<{ batchId?: string }>();
 const { user, go, toast, refresh } = useApp();
 const batches = ref<Batch[]>([]),
@@ -22,12 +23,18 @@ const batchName = ref(""),
   confirmOpen = ref(false),
   batchPage = ref(1);
 const admin = computed(() => user.value?.role === "admin");
+const groupBlocked = computed(() => active.value?.items?.some(i => i.grouped && !!i.error));
 const selectable = computed(
   () =>
     active.value?.items?.filter(
-      (i) => !i.error && i.classification !== "duplicate",
+      (i) => !i.error && i.classification !== "duplicate" && !(i.grouped && groupBlocked.value),
     ) || [],
 );
+function chooseItem(id: string, checked: boolean) {
+  const items = selectable.value.map(i => ({ ...i, group_id: i.grouped ? active.value!.id : undefined }));
+  const item = items.find(i => i.id === id);
+  if (item) chosen.value = toggleGroup(items, chosen.value, item, checked);
+}
 let timer: ReturnType<typeof setInterval>;
 async function load() {
   try {
@@ -196,13 +203,16 @@ onUnmounted(() => clearInterval(timer));
             labels[active.status]
           }}</span>
         </div>
+        <div v-if="active.status === 'confirmed'" class="import-next">
+          <span><Icon name="check" :size="18" />已生成审核项</span>
+          <button class="button primary small" @click="go('entries', '', 'batch_id=' + active.id + '&status=pending')">审核这一批 <Icon name="arrow" :size="15" /></button>
+        </div>
         <div
           v-if="['queued', 'processing'].includes(active.status)"
           class="empty-state"
         >
           <span class="spinner"></span>
           <h3>正在执行导入预检</h3>
-          <p>任务已保存。你可以离开此页面，稍后查看结果。</p>
         </div>
         <div v-if="active.status === 'failed'" class="content-pad">
           <p class="form-error">{{ active.job?.error }}</p>
@@ -235,6 +245,7 @@ onUnmounted(() => clearInterval(timer));
               {{ warning }}
             </p>
           </details>
+          <p v-if="groupBlocked && active.status === 'preview'" class="validation-box error">关联变更组校验失败，请修正后重新上传。</p>
           <div
             v-if="active.status === 'preview' && admin"
             class="toolbar content-pad"
@@ -274,19 +285,19 @@ onUnmounted(() => clearInterval(timer));
                 <tr v-for="item in active.items" :key="item.id">
                   <td v-if="admin && active.status === 'preview'">
                     <input
-                      v-model="chosen"
-                      :value="item.id"
+                      :checked="chosen.includes(item.id)"
+                      @change="chooseItem(item.id, ($event.target as HTMLInputElement).checked)"
                       type="checkbox"
                       :aria-label="'选择 ' + item.path"
                       :disabled="
-                        !!item.error || item.classification === 'duplicate'
+                        !!item.error || item.classification === 'duplicate' || (item.grouped && groupBlocked)
                       "
                     />
                   </td>
                   <td>
                     <strong class="path-label">{{ item.path }}</strong
                     ><small v-if="item.grouped" class="cell-note"
-                      >关联变更组 · 必须一起导入与发布</small
+                      >关联变更组</small
                     >
                     <p v-if="item.error" class="form-error">{{ item.error }}</p>
                     <small
@@ -304,10 +315,9 @@ onUnmounted(() => clearInterval(timer));
                   <td>
                     <button
                       class="text-button"
-                      :disabled="!!item.error"
                       @click="showItem(item.id)"
                     >
-                      差异
+                      预览
                     </button>
                   </td>
                 </tr>
@@ -317,7 +327,6 @@ onUnmounted(() => clearInterval(timer));
         >
         <div v-else-if="active.status === 'preview'" class="empty-state">
           <h3>没有可导入的知识正文</h3>
-          <p>请查看文件提示，并上传包含知识词条的文件。</p>
         </div>
         <div v-if="active.assets?.length && admin" class="source-assets">
           <h3>原始上传文件</h3>
@@ -332,7 +341,6 @@ onUnmounted(() => clearInterval(timer));
       <div v-else class="empty-state import-empty">
         <Icon name="upload" :size="40" />
         <h2>选择一个导入批次</h2>
-        <p>支持 ZIP 知识库、多个 Markdown 文件与 JSONL 提案。</p>
         <button v-if="admin" class="button" @click="uploadOpen = true">
           上传待审核知识
         </button>
@@ -346,7 +354,7 @@ onUnmounted(() => clearInterval(timer));
           v-model="batchName"
           required
           maxlength="160"
-          placeholder="例如：晒太阳时间 · 第 25 期知识补充"
+          placeholder="批次名称"
       /></label>
       <div
         class="drop-zone"
@@ -396,15 +404,12 @@ onUnmounted(() => clearInterval(timer));
           <option value="streamer">主播档案</option>
           <option value="style">翻译风格</option>
           <option value="translation">翻译纠错</option></select
-        ><small
-          >ZIP 和目录导入按文件原目录识别。当前 FineSub 请导入 rendered/
-          投影。</small
         ></label
       ><label
         >来源与备注<textarea
           v-model="source"
           rows="3"
-          placeholder="节目期数、提取方式、字幕文件或来源说明"
+          placeholder="节目期数 / 字幕文件 / 来源"
         ></textarea>
       </label>
       <div class="modal-actions">
@@ -421,8 +426,7 @@ onUnmounted(() => clearInterval(timer));
   /></Modal>
   <Modal v-if="confirmOpen" title="确认导入" @close="confirmOpen = false"
     ><p>
-      将以下
-      {{ chosen.length }} 个项目加入审核队列。导入不会自动通过或发布任何内容。
+      导入 {{ chosen.length }} 项
     </p>
     <ul class="confirmation-list">
       <li

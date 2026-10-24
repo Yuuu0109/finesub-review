@@ -107,6 +107,14 @@ async function loadAudit() {
     toast((e as Error).message, true);
   }
 }
+/** 日志详情按键值行展示，超长值截断，完整内容留在 title 里。 */
+function detailText(value: unknown) {
+  const text = typeof value === "string" ? value : (JSON.stringify(value) ?? "");
+  return text.length > 80 ? text.slice(0, 80) + "…" : text;
+}
+function detailTitle(value: unknown) {
+  return typeof value === "string" ? value : (JSON.stringify(value) ?? "");
+}
 </script>
 <template>
   <div class="page-heading">
@@ -215,12 +223,6 @@ async function loadAudit() {
           </tbody>
         </table>
       </div>
-      <div class="permission-note">
-        <Icon name="shield" :size="18" />
-        <p>
-          普通成员可以浏览、提交意见、回复和认领审核。导入、正文修订、最终裁决、发布和账号管理仅限管理员。
-        </p>
-      </div>
     </section>
     <section v-else-if="tab === 'knowledge'" class="panel settings-form">
       <h2>知识库与兼容设置</h2>
@@ -238,11 +240,6 @@ async function loadAudit() {
             </option>
           </select></label
         >
-        <div class="callout">
-          “保留分类”用于现有 Markdown 和旧翻译纠错归档。FineSub 0.5.1 使用可选
-          [标记] 和四列术语行，支持翻译风格，已不再读取旧翻译纠错格式；v17
-          保留旧分类校验。改变规则不会自动迁移正文，导入、裁决和发布会按选定规则校验。
-        </div>
         <button class="button primary" :disabled="busy">保存设置</button>
       </form>
     </section>
@@ -263,9 +260,16 @@ async function loadAudit() {
               <td>{{ log.actor }}</td>
               <td class="nowrap">{{ actions[log.action] || log.action }}</td>
               <td>
-                <code class="audit-detail">{{
-                  JSON.stringify(log.detail)
-                }}</code>
+                <dl
+                  v-if="log.detail && Object.keys(log.detail).length"
+                  class="audit-fields"
+                >
+                  <template v-for="(value, key) in log.detail" :key="key">
+                    <dt>{{ key }}</dt>
+                    <dd :title="detailTitle(value)">{{ detailText(value) }}</dd>
+                  </template>
+                </dl>
+                <span v-else class="muted">—</span>
               </td>
             </tr>
           </tbody>
@@ -314,11 +318,8 @@ async function loadAudit() {
           v-model="memberName"
           required
           maxlength="80"
-          placeholder="填写你的昵称"
+          placeholder="昵称"
       /></label>
-      <p class="muted small-text">
-        此浏览器中的审核记录归于你的成员身份；昵称仅作署名。
-      </p>
       <button class="button primary" :disabled="busy">保存署名</button>
     </form>
     <form v-else @submit.prevent="changePassword">
@@ -370,7 +371,6 @@ async function loadAudit() {
           autocomplete="new-password"
           placeholder="至少 10 个字符"
       /></label>
-      <p class="muted small-text">普通成员使用访问口令进入，无需创建账号。</p>
       <div class="modal-actions">
         <button type="button" class="button" @click="userOpen = false">
           取消</button

@@ -94,7 +94,7 @@ export type Release = {
   report: { warnings?: string[]; errors?: string[]; files?: number; native_import_requires_compat_tool?: boolean };
   rollback_of: string | null;
   current: boolean;
-  job_id: string;
+  job_id: string | null;
 };
 export type Notice = {
   id: string;
@@ -139,7 +139,9 @@ export async function apiResponse(
         detail.startsWith("会话校验失败"))
     )
       window.dispatchEvent(new Event("session-expired"));
-    throw new Error(detail);
+    const error = new Error(detail) as Error & { status?: number };
+    error.status = result.status;
+    throw error;
   }
   return result;
 }

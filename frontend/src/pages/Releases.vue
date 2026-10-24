@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { api, post, date, labels, type Entry, type Release } from "../api";
+import { api, post, date, labels, type ReleaseCandidate, type Release } from "../api";
 import { useApp } from "../context";
 import Icon from "../components/Icon.vue";
 import Modal from "../components/Modal.vue";
 import DownloadLink from "../components/DownloadLink.vue";
+import { toggleGroup } from "../workflow";
 const { user, go, toast, refresh } = useApp();
 const rows = ref<Release[]>([]),
-  candidates = ref<Entry[]>([]),
+  candidates = ref<ReleaseCandidate[]>([]),
   selected = ref<string[]>([]),
   busy = ref(false),
   publishOpen = ref(false),
@@ -15,23 +16,26 @@ const rows = ref<Release[]>([]),
   name = ref(""),
   notes = ref("");
 const admin = computed(() => user.value?.role === "admin");
+const eligible = computed(() => candidates.value.filter(c => !c.blockers.length));
+const processing = computed(() => rows.value.some(r => ['queued', 'processing'].includes(r.status)));
+const loading = ref(false), error = ref('');
+function selectCandidate(item: ReleaseCandidate, checked: boolean) {
+  selected.value = toggleGroup(eligible.value, selected.value, item, checked);
+}
 let timer: ReturnType<typeof setInterval>;
 async function load() {
+  if (loading.value) return;
+  loading.value = true; error.value = '';
   try {
     rows.value = await api("/releases");
-    let result: Entry[] = [];
-    for (let page = 1; page <= 20; page++) {
-      const data = await api(`/entries?status=approved&limit=100&page=${page}`);
-      result.push(...data.items);
-      if (page * 100 >= data.total) break;
-    }
-    candidates.value = result.filter((e) => !e.published);
+    candidates.value = admin.value ? await api<ReleaseCandidate[]>("/releases/candidates") : [];
     selected.value = selected.value.filter((id) =>
-      candidates.value.some((c) => c.id === id),
+      eligible.value.some((c) => c.id === id),
     );
   } catch (e) {
-    toast((e as Error).message, true);
-  }
+    error.value = (e as Error).message;
+    toast(error.value, true);
+  } finally { loading.value = false; }
 }
 function startPublish() {
   rollback.value = null;
@@ -65,7 +69,8 @@ async function publish() {
     busy.value = false;
   }
 }
-async function retry(id: string) {
+async function retry(id: string | null) {
+  if (!id) return;
   busy.value = true;
   try {
     await post("/jobs/" + id + "/retry");
@@ -94,6 +99,8 @@ onUnmounted(() => clearInterval(timer));
       <Icon name="refresh" :size="17" />刷新
     </button>
   </div>
+  <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+  <p v-if="processing" class="callout" role="status">正在生成发布包…</p>
   <section v-if="admin" class="panel release-candidates">
     <div class="panel-heading">
       <div>
@@ -103,7 +110,7 @@ onUnmounted(() => clearInterval(timer));
       </div>
       <button
         class="button primary"
-        :disabled="!selected.length || busy"
+        :disabled="!selected.length || busy || loading || processing || !!error"
         @click="startPublish"
       >
         <Icon name="plus" :size="17" />创建发布 · {{ selected.length }}
@@ -113,17 +120,18 @@ onUnmounted(() => clearInterval(timer));
       <label class="checkbox-label"
         ><input
           type="checkbox"
-          :checked="selected.length === candidates.length"
+          :checked="eligible.length > 0 && selected.length === eligible.length"
+          :disabled="!eligible.length || busy || loading"
           @change="
             selected = ($event.target as HTMLInputElement).checked
-              ? candidates.map((c) => c.id)
+              ? eligible.map((c) => c.id)
               : []
           "
-        />选择全部待发布变更</label
+        />选择全部可发布变更（{{ eligible.length }}）</label
       >
       <div class="candidate-grid">
-        <label v-for="item in candidates" :key="item.id" class="candidate-item"
-          ><input v-model="selected" :value="item.id" type="checkbox" /><span
+        <div v-for="item in candidates" :key="item.id" class="candidate-item" :class="{ blocked: item.blockers.length }"
+          ><input :checked="selected.includes(item.id)" :disabled="!!item.blockers.length || busy || loading" :aria-label="'选择 ' + item.title" @change="selectCandidate(item, ($event.target as HTMLInputElement).checked)" type="checkbox" /><span
             ><strong>{{ item.title }}</strong
             ><small
               >{{ labels[item.category] }} · v{{ item.number
@@ -133,12 +141,16 @@ onUnmounted(() => clearInterval(timer));
             class="badge"
             :class="item.operation === 'delete' ? 'rejected' : 'approved'"
             >{{ item.operation === "delete" ? "拟删除" : "已通过" }}</span
-          ></label
+          ><div v-if="item.blockers.length" class="candidate-blockers"><p v-for="reason in item.blockers" :key="reason">{{ reason }}</p>
+            <button class="text-button" @click="go('review', item.entry_id, item.group_id ? 'group_id=' + item.group_id : '')">处理此项 <Icon name="arrow" :size="14" /></button>
+            <button v-for="related in item.related.filter(r => r.status !== 'approved')" :key="related.id" class="text-button" @click="go('review', related.entry_id, 'group_id=' + item.group_id)">审核 {{ related.title }}</button>
+          </div></div
         >
       </div>
     </div>
     <div v-else class="empty-small">
-      暂无待发布变更
+      {{ loading ? '正在检查发布条件…' : '暂无待发布变更' }}
+      <button v-if="!loading" class="text-button" @click="go('entries', 'pending')">前往审核</button>
     </div>
   </section>
   <div class="section-heading">
@@ -159,7 +171,7 @@ onUnmounted(() => clearInterval(timer));
         <span class="badge" :class="row.status">{{ labels[row.status] }}</span
         ><span v-if="row.current" class="tag current">当前正式版本</span>
       </div>
-      <p>{{ row.notes || "未填写发布说明" }}</p>
+      <p v-if="row.notes">{{ row.notes }}</p>
       <div class="release-meta">
         <span>{{ date(row.created_at) }}</span
         ><span>{{ row.count }} 个知识记录</span
@@ -169,8 +181,8 @@ onUnmounted(() => clearInterval(timer));
       <div v-if="row.report.errors?.length" class="form-error">
         <p v-for="error in row.report.errors" :key="error">{{ error }}</p>
       </div>
-      <p v-if="row.report.native_import_requires_compat_tool" class="callout">
-        此版本含保留旧节点的兼容修改。请通过专用导入工具应用知识库包；直接覆盖原生知识正文会触发重新归类。
+      <p v-if="row.report.native_import_requires_compat_tool" class="small-text muted">
+        导入方式：专用兼容工具
       </p>
       <details v-if="row.report.warnings?.length" class="release-warnings">
         <summary>{{ row.report.warnings.length }} 项兼容提示</summary>
@@ -200,27 +212,24 @@ onUnmounted(() => clearInterval(timer));
         >
           回退到此版本
         </button></template
-      ><button
-        v-else-if="row.status === 'failed'"
-        class="button"
-        :disabled="busy"
-        @click="retry(row.job_id)"
-      >
-        重试生成</button
+      ><template v-else-if="row.status === 'failed'"
+        ><button
+          class="button"
+          :disabled="busy || !row.job_id"
+          @click="retry(row.job_id)"
+        >
+          重试生成</button
+        ><span v-if="!row.job_id" class="muted small-text">任务记录缺失</span></template
       ><span v-else class="muted">正在生成…</span>
     </div>
   </article>
   <Modal
     v-if="publishOpen"
     :title="rollback ? '回退正式知识库' : '创建发布版本'"
-    @close="publishOpen = false"
+    @close="!busy && (publishOpen = false)"
     ><form @submit.prevent="publish">
-      <div class="callout">
-        {{
-          rollback
-            ? `将正式知识库恢复为「${rollback.name}」的完整内容，系统会生成新的发布记录。`
-            : "本次变更将合入当前正式知识库，未变更的内容会保留。"
-        }}
+      <div v-if="rollback" class="callout">
+        正式知识库将恢复为「{{ rollback.name }}」的完整内容。
       </div>
       <label>版本名称<input v-model="name" required maxlength="120" /></label
       ><label
@@ -228,7 +237,7 @@ onUnmounted(() => clearInterval(timer));
           v-model="notes"
           :required="!!rollback"
           rows="3"
-          :placeholder="rollback ? '说明此次回退的原因' : '概括本次知识变更'"
+          :placeholder="rollback ? '回退原因' : '变更内容'"
         ></textarea>
       </label>
       <ul v-if="!rollback" class="confirmation-list">

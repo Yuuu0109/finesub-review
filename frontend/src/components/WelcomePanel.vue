@@ -7,8 +7,7 @@ import Icon from "./Icon.vue";
   <aside class="welcome-panel">
     <Brand />
     <div class="welcome-copy">
-      <span class="welcome-kicker">让好翻译，有迹可循</span>
-      <h1>一起，把每个词<br />校对得更好<span>。</span></h1>
+      <h1>知识审核<br />与协作</h1>
       <div class="proof-sheet" aria-hidden="true">
         <div class="proof-sheet-top">
           <span>校对札记</span><Icon name="book" :size="18" />
@@ -19,13 +18,13 @@ import Icon from "./Icon.vue";
         <p>穿过枝叶的<span class="proof-highlight">阳光</span>。</p>
         <div class="proof-sheet-bottom">
           <span class="proof-rule"></span><Icon name="check" :size="16" /><span
-            >让语意，恰如其分</span
+            >中文释义</span
           >
         </div>
       </div>
     </div>
     <div class="welcome-footer">
-      <span>FineSub Review</span><span>共建 · 校对 · 定稿</span>
+      <span>FineSub Review</span>
     </div>
   </aside>
 </template>

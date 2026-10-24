@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { api, date, labels, type Entry } from "../api";
 import { useApp } from "../context";
 import Icon from "../components/Icon.vue";
 const { user, go, toast } = useApp();
+const queue = computed(() => user.value?.role === 'admin' ? 'status=pending' : 'status=pending&reviewed=no');
 const stats = ref<any>(null),
+  queueTotal = ref(0),
   entries = ref<Entry[]>([]),
   error = ref("");
 onMounted(async () => {
   try {
     const [s, e] = await Promise.all([
       api("/dashboard"),
-      api("/entries?status=pending&limit=6"),
+      api("/entries?" + queue.value + "&limit=6"),
     ]);
     stats.value = s;
     entries.value = e.items;
+    queueTotal.value = e.total;
   } catch (e) {
     error.value = (e as Error).message;
     toast(error.value, true);
@@ -22,13 +25,15 @@ onMounted(async () => {
 });
 </script>
 <template>
-  <div class="page-heading dashboard-heading">
+  <div class="page-heading dashboard-heading workbench-lead">
     <div>
-      <h1>欢迎回来，{{ user?.name }}</h1>
+      <h1>工作台</h1>
     </div>
+    <div class="heading-actions">
+    <button v-if="entries.length" class="button primary" @click="go('review', entries[0]!.entry_id, queue)">继续审核 <Icon name="arrow" :size="17" /></button>
     <button
       v-if="user?.role === 'admin'"
-      class="button primary"
+      class="button"
       @click="go('imports')"
     >
       <Icon name="plus" :size="18" />导入知识库
@@ -36,65 +41,30 @@ onMounted(async () => {
     <button v-else class="button primary" @click="go('entries')">
       <Icon name="book" :size="18" />浏览知识库
     </button>
+    </div>
   </div>
   <p v-if="error" class="form-error">{{ error }}</p>
   <template v-if="stats">
-    <div class="metrics">
-      <button @click="go('entries')">
-        <span class="metric-label"
-          >知识条目<Icon name="book" :size="18"
-        /></span>
-        <strong>{{ stats.total }}<small>条</small></strong>
-        <span class="metric-foot"
-          >全部知识<Icon name="arrow" :size="14"
-        /></span>
-      </button>
-      <button class="metric-pending" @click="go('entries', 'pending')">
-        <span class="metric-label"
-          >等待裁决<Icon name="clock" :size="18"
-        /></span>
-        <strong class="amber-text"
-          >{{ stats.counts.pending || 0 }}<small>条</small></strong
-        >
-        <span class="metric-foot"
-          >查看待审词条<Icon name="arrow" :size="14"
-        /></span>
-      </button>
-      <button @click="go('releases')">
-        <span class="metric-label"
-          >通过待发布<Icon name="check" :size="18"
-        /></span>
-        <strong class="green-text"
-          >{{ stats.pending_publish }}<small>条</small></strong
-        >
-        <span class="metric-foot"
-          >前往发布<Icon name="arrow" :size="14"
-        /></span>
-      </button>
-      <button @click="go('mine')">
-        <span class="metric-label"
-          >分配给我<Icon name="users" :size="18"
-        /></span>
-        <strong>{{ stats.mine }}<small>条</small></strong>
-        <span class="metric-foot"
-          >我的审核<Icon name="arrow" :size="14"
-        /></span>
-      </button>
+    <div class="workflow-overview" aria-label="知识审核流程">
+      <button @click="go('entries')"><Icon name="book" :size="21" /><span>知识库<strong>{{ stats.total }}<small>条知识</small></strong></span><Icon name="arrow" :size="16" /></button>
+      <button class="current-step" @click="go('entries', 'pending')"><Icon name="clock" :size="21" /><span>待裁决<strong>{{ stats.counts.pending || 0 }}<small>条</small></strong></span><Icon name="arrow" :size="16" /></button>
+      <button @click="go('entries', 'needs_changes')"><Icon name="edit" :size="21" /><span>待补充<strong>{{ stats.counts.needs_changes || 0 }}<small>条</small></strong></span><Icon name="arrow" :size="16" /></button>
+      <button @click="go('releases')"><Icon name="download" :size="21" /><span>通过待发布<strong>{{ stats.pending_publish }}<small>条</small></strong></span><Icon name="arrow" :size="16" /></button>
     </div>
     <div class="dashboard-columns">
       <section class="panel">
         <div class="panel-heading">
           <div class="heading-with-count">
-            <h2>待裁决知识</h2>
-            <span class="count-chip">{{ stats.counts.pending || 0 }}</span>
+            <h2>{{ user?.role === 'admin' ? '待裁决知识' : '我未审核的知识' }}</h2>
+            <span class="count-chip">{{ queueTotal }}</span>
           </div>
-          <button class="text-button" @click="go('entries', 'pending')">
+          <button class="text-button" @click="go('entries', '', queue)">
             查看全部<Icon name="arrow" :size="16" />
           </button>
         </div>
         <div v-if="!entries.length" class="empty-state">
           <Icon name="check" :size="36" />
-          <h3>{{ stats.total ? "待审知识已处理完毕" : "还没有待审知识" }}</h3>
+          <h3>暂无待审知识</h3>
           <button
             v-if="user?.role === 'admin' && !stats.total"
             class="button"
@@ -107,7 +77,7 @@ onMounted(async () => {
           v-for="entry in entries"
           :key="entry.id"
           class="entry-preview"
-          @click="go('review', entry.entry_id)"
+          @click="go('review', entry.entry_id, queue)"
         >
           <span class="entry-file"
             ><Icon
@@ -154,7 +124,7 @@ onMounted(async () => {
         </section>
         <section class="panel quick-links">
           <div class="panel-heading">
-            <h2>继续协作</h2>
+            <h2>快捷入口</h2>
             <span class="muted small-text">{{ stats.reviews }} 条审核记录</span>
           </div>
           <button @click="go('mine')">

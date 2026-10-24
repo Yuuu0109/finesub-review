@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { api, date, labels, type Detail, type Entry } from "../api";
 import { useApp } from "../context";
 import Icon from "../components/Icon.vue";
@@ -93,7 +93,7 @@ function quotes(text: string): string[] {
 
 const visibleContent = computed(() => (profile.value?.entry.content ?? "").replace(/<!--[^]*?-->/g, ""));
 const sections = computed(() => splitSections(visibleContent.value));
-const nodeFormat = computed(() => settings.value.profile === "finesub-0.5.1" || /^(?:-\s+)?\[[^\[\]]+\]/m.test(visibleContent.value));
+const nodeFormat = computed(() => ["finesub-0.5.1", "finesub-0.6.0"].includes(settings.value.profile) || /^(?:-\s+)?\[[^\[\]]+\]/m.test(visibleContent.value));
 
 const intro = computed(
   () =>
@@ -125,7 +125,21 @@ const names = computed(() =>
 );
 
 const basicName = computed(() =>
-  pick(registry.value, "本名").split(/[／/]/).map((item) => item.trim()),
+  pick(registry.value, "本名")
+    .split(/[／/]/)
+    .map((item) => item.trim())
+    .filter(Boolean),
+);
+
+// 人设与徽标都只取档案里真实存在的内容，读不到就不渲染。
+const roleLine = computed(() => pick(registry.value, "人设"));
+const monogram = computed(
+  () => profile.value?.entry.title.trim().slice(0, 1) ?? "",
+);
+
+// 节目名只取当前词条自己写的内容，取不到就用中性标题，不写死某个节目。
+const programName = computed(
+  () => `${intro.value}\n${roleLine.value}`.match(/《([^》]+)》/)?.[1]?.trim() ?? "",
 );
 
 const live = computed(() => fields(sections.value["直播内容"] ?? ""));
@@ -220,82 +234,63 @@ const visibleEntries = computed(() =>
 
 const profileEntryId = computed(() => profile.value?.entry.entry_id ?? "");
 
-/* ------------------------------------------------------- 联网核对补充 */
-// 已公开可查、但当前知识库档案里尚未收录的信息。核对后可作为下一批导入素材。
-const webFacts = [
-  {
-    date: "2025-09-16",
-    text: "发行首支个人单曲《夢の道標（夢のみちしるべ）》，作词由本人担任，是个人歌手出道的首支原创曲。",
-    source: "官方音源 / Bandori Wiki",
-  },
-  {
-    date: "2025-02",
-    text: "以长崎爽世身份出演 Sony 音乐节目 THE FIRST TAKE，演唱《春日影》与《潜在表明》。",
-    source: "萌娘百科",
-  },
-  {
-    date: "2024-12-22",
-    text: "确诊甲型流感，因此缺席 MyGO!!!!! 7th LIVE。",
-    source: "MyGO!!!!! 官方 X / Bandori Wiki",
-  },
-  {
-    date: "2023-06-29",
-    text: "动画《BanG Dream! It's MyGO!!!!!》首播，长崎爽世为其声优出道角色。",
-    source: "百度百科",
-  },
-  {
-    date: "",
-    text: "小学时担任学生会长；中学二年级因 LoveLive! 立志成为声优；高中因 BanG Dream! 开始弹贝斯，第一首练的是《STAR BEAT!〜ホシノコドウ〜》。",
-    source: "萌娘百科 / Bandori Wiki",
-  },
-  {
-    date: "",
-    text: "不喜欢的食物是胡萝卜；兴趣含跳舞，偏好 anisong 与偶像歌谣，喜欢的艺人有 saji、石原夏织、水濑伊织。",
-    source: "Bandori Wiki",
-  },
-];
-
-const conflicts = [
-  {
-    title: "血型记录不一致",
-    detail:
-      "知识库档案记为 O 型（依据 namu 称官网确认），Bandori Wiki 记 A 型，部分粉丝 wiki 也标 A。以官方资料为准，建议核实后统一。",
-  },
-];
-
 /* ---------------------------------------------------------------- 加载 */
 
+// 连点刷新会并发多次 load()，只让最后一次的结果落到页面上。
+let sequence = 0;
+
 async function load() {
+  const request = ++sequence;
   loading.value = true;
   error.value = "";
+  profile.value = null;
+  typeFilter.value = "";
+  const wanted = props.entryId?.trim() ?? "";
   try {
-    const list = await api<{ items: Entry[] }>("/entries?category=streamer&limit=20");
-    const target =
-      list.items.find((item) => item.path === "streamer/小日向美香.md") ??
-      list.items[0];
-    if (!target) {
-      error.value = "知识库里还没有主播档案词条。请先在“导入批次”导入 streamer/ 目录。";
-      return;
+    // 已知词条直接按 id 取，列表只用于没带 id 时选默认档案，
+    // 否则主播超过 100 个、或目标不在第一页时会误报「未找到」。
+    let targetId = wanted;
+    if (!targetId) {
+      const list = await api<{ items: Entry[] }>(
+        "/entries?category=streamer&limit=100",
+      );
+      if (request !== sequence) return;
+      targetId = list.items[0]?.entry_id ?? "";
+      if (!targetId) {
+        error.value = "暂无主播档案";
+        return;
+      }
     }
     const [detail, common, translation] = await Promise.all([
-      api<Detail>(`/entries/${target.entry_id}`),
+      api<Detail>(`/entries/${targetId}`),
       api<{ items: Entry[] }>("/entries?category=common&limit=100"),
       api<{ items: Entry[] }>("/entries?category=translation&limit=100"),
     ]);
+    if (request !== sequence) return;
+    if (wanted && detail.entry.category !== "streamer") {
+      error.value = "未找到该主播档案";
+      return;
+    }
     profile.value = detail;
     entries.value = [
       ...common.items,
       ...translation.items.map((item) => ({ ...item, kind: "翻译纠错" })),
     ];
   } catch (e) {
-    error.value = (e as Error).message;
+    if (request !== sequence) return;
+    const status = (e as Error & { status?: number }).status;
+    error.value =
+      wanted && status === 404 ? "未找到该主播档案" : (e as Error).message;
     toast(error.value, true);
   } finally {
-    loading.value = false;
+    if (request === sequence) loading.value = false;
   }
 }
 
 onMounted(load);
+// 父组件按 entryId 挂 :key，重建时这里不会触发；保留是为了 :key 被移除后
+// 仍能跟随 entryId 重新加载，避免静默显示上一个主播。
+watch(() => props.entryId, load);
 </script>
 
 <template>
@@ -311,16 +306,12 @@ onMounted(load);
   <template v-else-if="profile">
     <section class="profile-hero">
       <div class="profile-identity">
-        <span class="profile-monogram">蜜</span>
+        <span v-if="monogram" class="profile-monogram">{{ monogram }}</span>
         <div>
           <div class="eyebrow">主播档案</div>
           <h1>{{ profile.entry.title }}</h1>
-          <p class="profile-romaji">{{ basicName.join(" / ") }}</p>
-          <p v-if="nodeFormat" class="profile-role">{{ pick(registry, "人设") }}</p>
-          <p v-else class="profile-role">
-            声优 ·《小日向美香のひなたぼっこ。》主播 ·
-            MyGO!!!!! 贝斯手（长崎爽世）
-          </p>
+          <p v-if="basicName.length" class="profile-romaji">{{ basicName.join(" / ") }}</p>
+          <p v-if="roleLine" class="profile-role">{{ roleLine }}</p>
         </div>
       </div>
       <div class="profile-hero-side">
@@ -359,7 +350,7 @@ onMounted(load);
     <section v-else class="panel profile-block">
       <div class="panel-heading">
         <div>
-          <h2>节目「ひなたぼっこ。」</h2>
+          <h2>{{ programName ? `节目《${programName}》` : "节目内容" }}</h2>
         </div>
         <Icon name="message" :size="19" />
       </div>
@@ -455,9 +446,7 @@ onMounted(load);
               </button>
             </div>
             <p v-if="untyped.length" class="untyped-hint">
-              <Icon name="shield" :size="15" />有
-              {{ untyped.length }}
-              条词条尚未标注类型。可以在导入时附上 common/index.md，保留已有分类。
+              <Icon name="shield" :size="15" />{{ untyped.length }} 项未分类
             </p>
           </div>
           <div class="kb-grid">
@@ -524,25 +513,6 @@ onMounted(load);
                 </li>
               </ul>
             </div>
-          </div>
-        </section>
-
-        <section class="panel profile-block web-panel">
-          <div class="panel-heading">
-            <div>
-              <h2>联网核对补充</h2>
-            </div>
-          </div>
-          <div class="content-pad">
-            <article v-for="item in webFacts" :key="item.text" class="web-fact">
-              <span v-if="item.date" class="timeline-date">{{ item.date }}</span>
-              <p>{{ item.text }}</p>
-              <small class="web-source">来源：{{ item.source }}</small>
-            </article>
-            <article v-for="item in conflicts" :key="item.title" class="web-fact conflict">
-              <strong>{{ item.title }}</strong>
-              <p>{{ item.detail }}</p>
-            </article>
           </div>
         </section>
 
