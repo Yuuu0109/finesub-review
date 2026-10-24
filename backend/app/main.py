@@ -29,7 +29,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title='FineSub 知识库审核', version='0.1.0', lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title='FineSub 知识库审核', version='0.3.0', lifespan=lifespan, docs_url=None, redoc_url=None)
 
 
 def security_headers(response, path):
