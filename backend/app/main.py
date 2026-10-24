@@ -130,7 +130,7 @@ class Assignment(Payload):
 
 class SettingsPayload(Payload):
     name: str = Field(min_length=1, max_length=100)
-    profile: Literal['legacy-preserve', 'finesub-code-v17', 'finesub-0.5.1']
+    profile: Literal['legacy-preserve', 'finesub-code-v17', 'finesub-0.5.1', 'finesub-0.6.0']
 
 
 @app.get('/api/health')

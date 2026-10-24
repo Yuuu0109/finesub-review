@@ -92,12 +92,20 @@ def test_untrusted_bundle_cannot_create_old_nodes_in_current_profile():
     assert a.get('/api/import-items/' + batch['items'][0]['id']).json()['content'] == OLD
 
 
-@pytest.mark.skipif(not all(os.getenv(name) for name in ('REVIEW_KNOWLEDGE_TEST_ROOT', 'FINESUB_COMPAT_SRC', 'FINESUB_REFERENCE_SRC')), reason='Supply explicit source and engines')
-def test_cli_dry_run_apply_stale_and_unpatched_engine_are_safe(tmp_path):
-    source = Path(os.environ['REVIEW_KNOWLEDGE_TEST_ROOT'])
+@pytest.fixture(params=[node_markdown.PROFILE, node_markdown.CURRENT_PROFILE])
+def native_config(request):
+    names = ('REVIEW_KNOWLEDGE_TEST_ROOT', 'FINESUB_COMPAT_SRC', 'FINESUB_REFERENCE_SRC') if request.param == node_markdown.PROFILE else ('REVIEW_SCHEMA6_TEST_ROOT', 'FINESUB6_COMPAT_SRC', 'FINESUB6_REFERENCE_SRC')
+    if not all(os.getenv(name) for name in names):
+        pytest.skip('Supply explicit source and engines for ' + request.param)
+    return request.param, *(os.environ[name] for name in names)
+
+
+def test_cli_dry_run_apply_stale_and_unpatched_engine_are_safe(tmp_path, native_config):
+    profile, knowledge_root, compat_src, reference_src = native_config
+    source = Path(knowledge_root)
     docs = {name: (source / 'rendered' / name).read_text(encoding='utf-8') for name in FILES}
     targets = {**docs, FILES[0]: docs[FILES[0]].replace('标题「致並跡（ちへいせん）」=「地平線」同音借字', '标题「致並跡（ちへいせん）」=「地平線」同音借字（CLI副本验证）')}
-    files, report = compat.build_files(targets, node_markdown.PROFILE, baselines=docs)
+    files, report = compat.build_files(targets, profile, baselines=docs)
     assert not report['errors']
     archive = tmp_path / 'cli-compat.zip'
     archive.write_bytes(compat.make_zip(files))
@@ -108,31 +116,31 @@ def test_cli_dry_run_apply_stale_and_unpatched_engine_are_safe(tmp_path):
             shutil.copy2(source / name, copied / name)
     base = [sys.executable, str(ROOT / 'scripts/apply_compat_release.py'), '--knowledge-root', str(copied), '--archive', str(archive)]
     before = compat.digest((copied / 'knowledge.sqlite').read_bytes())
-    blocked = subprocess.run([*base, '--finesub-src', os.environ['FINESUB_REFERENCE_SRC'], '--apply'], capture_output=True, text=True, encoding='utf-8', timeout=30)
+    blocked = subprocess.run([*base, '--finesub-src', reference_src, '--apply'], capture_output=True, text=True, encoding='utf-8', timeout=30)
     assert blocked.returncode != 0 and '未安装' in blocked.stderr
     assert before == compat.digest((copied / 'knowledge.sqlite').read_bytes())
-    dry = subprocess.run([*base, '--finesub-src', os.environ['FINESUB_COMPAT_SRC']], capture_output=True, text=True, encoding='utf-8', timeout=30)
+    dry = subprocess.run([*base, '--finesub-src', compat_src], capture_output=True, text=True, encoding='utf-8', timeout=30)
     assert dry.returncode == 0, dry.stdout + dry.stderr
     assert json.loads(dry.stdout)['dry_run'] and before == compat.digest((copied / 'knowledge.sqlite').read_bytes())
-    applied = subprocess.run([*base, '--finesub-src', os.environ['FINESUB_COMPAT_SRC'], '--apply'], capture_output=True, text=True, encoding='utf-8', timeout=30)
+    applied = subprocess.run([*base, '--finesub-src', compat_src, '--apply'], capture_output=True, text=True, encoding='utf-8', timeout=30)
     assert applied.returncode == 0, applied.stdout + applied.stderr
     assert not json.loads(applied.stdout)['dry_run']
     after = compat.digest((copied / 'knowledge.sqlite').read_bytes())
-    stale = subprocess.run([*base, '--finesub-src', os.environ['FINESUB_COMPAT_SRC'], '--apply'], capture_output=True, text=True, encoding='utf-8', timeout=30)
+    stale = subprocess.run([*base, '--finesub-src', compat_src, '--apply'], capture_output=True, text=True, encoding='utf-8', timeout=30)
     assert stale.returncode != 0 and '基础投影已变化' in stale.stderr
     assert after == compat.digest((copied / 'knowledge.sqlite').read_bytes())
     unrelated = next(path for path in (copied / 'rendered/common').glob('*.md') if path.name != 'index.md' and path.relative_to(copied / 'rendered').as_posix() not in FILES)
     pending = unrelated.read_text(encoding='utf-8') + '\n- 用户未收录的副本修改\n'
     unrelated.write_text(pending, encoding='utf-8')
-    dirty = subprocess.run([*base, '--finesub-src', os.environ['FINESUB_COMPAT_SRC'], '--apply'], capture_output=True, text=True, encoding='utf-8', timeout=30)
+    dirty = subprocess.run([*base, '--finesub-src', compat_src, '--apply'], capture_output=True, text=True, encoding='utf-8', timeout=30)
     assert dirty.returncode != 0 and '未收录修改' in dirty.stderr
     assert unrelated.read_text(encoding='utf-8') == pending
     assert after == compat.digest((copied / 'knowledge.sqlite').read_bytes())
 
 
-@pytest.mark.skipif(not os.getenv('REVIEW_KNOWLEDGE_TEST_ROOT') or not os.getenv('FINESUB_COMPAT_SRC'), reason='Supply an explicit real source and isolated patched engine')
-def test_three_real_samples_roundtrip_and_native_invariants(tmp_path):
-    source = Path(os.environ['REVIEW_KNOWLEDGE_TEST_ROOT'])
+def test_three_real_samples_roundtrip_and_native_invariants(tmp_path, native_config):
+    profile, knowledge_root, compat_src, _ = native_config
+    source = Path(knowledge_root)
     docs = {name: (source / 'rendered' / name).read_text(encoding='utf-8') for name in FILES}
     imports = dict(docs)
     for category in ('common', 'streamer'):
@@ -141,7 +149,7 @@ def test_three_real_samples_roundtrip_and_native_invariants(tmp_path):
             imports[category + '/index.md'] = index.read_text(encoding='utf-8')
     a = client()
     upload(a, imports)  # Administrator explicitly establishes the old source once.
-    assert a.put('/api/settings', json={'name': '三份真实旧知识', 'profile': node_markdown.PROFILE}).status_code == 200
+    assert a.put('/api/settings', json={'name': '三份真实旧知识', 'profile': profile}).status_code == 200
     original = {entry['path']: entry for entry in a.get('/api/entries').json()['items']}
     targets = {
         FILES[0]: docs[FILES[0]].replace('标题「致並跡（ちへいせん）」=「地平線」同音借字', '标题「致並跡（ちへいせん）」=「地平線」同音借字（副本兼容验证）'),
@@ -175,7 +183,7 @@ def test_three_real_samples_roundtrip_and_native_invariants(tmp_path):
     assert all(not item['error'] and item['classification'] == 'duplicate' for item in reimport['items'])
     archive = tmp_path / 'preserved-export.zip'
     archive.write_bytes(a.get('/api/releases/' + release + '/download').content)
-    (ROOT / 'test-results' / 'preserved-export.zip').write_bytes(archive.read_bytes())
+    (ROOT / 'test-results' / f'preserved-export-{profile}.zip').write_bytes(archive.read_bytes())
     copied = tmp_path / 'native-copy'
     copied.mkdir()
     hashes_before = {name: compat.digest((source / name).read_bytes()) if (source / name).exists() else None for name in ('knowledge.sqlite', 'knowledge.sqlite-wal')}
@@ -184,12 +192,12 @@ def test_three_real_samples_roundtrip_and_native_invariants(tmp_path):
             shutil.copy2(source / name, copied / name)
     assert hashes_before == {name: compat.digest((source / name).read_bytes()) if (source / name).exists() else None for name in hashes_before}
     report_path = tmp_path / 'native-preserved.json'
-    command = [sys.executable, str(ROOT / 'backend/tests/native_preserved_probe.py'), '--engine-src', os.environ['FINESUB_COMPAT_SRC'], '--knowledge-root', str(copied), '--archive', str(archive), '--report', str(report_path)]
+    command = [sys.executable, str(ROOT / 'backend/tests/native_preserved_probe.py'), '--engine-src', compat_src, '--knowledge-root', str(copied), '--archive', str(archive), '--report', str(report_path)]
     probe = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', timeout=60)
     assert probe.returncode == 0, probe.stdout + probe.stderr
     report = json.loads(report_path.read_text(encoding='utf-8'))
     assert report['counts'] == [[6, 6], [10, 10], [7, 7]]
     assert report['original_node_ids_and_kinds_preserved'] and report['memberships_and_matching_items_unchanged']
     assert report['unrelated_payloads_unchanged'] and report['evidence_history_preserved'] and report['atomic_conflict_preserved_other_fields']
-    (ROOT / 'test-results' / 'native-preserved.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    (ROOT / 'test-results' / f'native-preserved-{profile}.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     assert hashes_before == {name: compat.digest((source / name).read_bytes()) if (source / name).exists() else None for name in hashes_before}

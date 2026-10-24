@@ -1,6 +1,6 @@
 """Plan existing-node value updates using the native store and apply engine.
 
-Needs engine-preserved-values.patch for body edits. Does not migrate kinds,
+Needs the matching engine-preserved-values patch for body edits. Does not migrate kinds,
 sections, matching items or visibility and never writes SQL directly.
 """
 import json
@@ -9,16 +9,24 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
-from app import compat, node_compat
+from app import compat, node_compat, node_markdown
 
 ENGINE_BASE = 'af32b0145f70a98199b246704076c384bfda95ee'
 
 
-def check_engine():
-    from finesub.llm.knowledge.node import apply as native_apply
+def engine_profile():
     from finesub.llm.knowledge.node.schema import SCHEMA_VERSION
-    if SCHEMA_VERSION != 5 or getattr(native_apply, 'PRESERVED_ENGINE_BASE', None) != ENGINE_BASE or getattr(native_apply, 'PRESERVED_VALUES_COMPAT_VERSION', None) != 1:
-        raise ValueError('指定引擎未安装此版本的受限兼容补丁；未写入。请先审阅 engine-preserved-values.patch，在副本验证后另行落地引擎补丁')
+    return node_markdown.profile_for_schema(SCHEMA_VERSION)
+
+
+def check_engine(profile=None):
+    from finesub.llm.knowledge.node import apply as native_apply
+    actual = engine_profile()
+    if profile is not None and profile != actual:
+        raise ValueError(f'发布包 {profile} 与引擎 {actual} 不匹配；未写入，不自动迁移')
+    spec = node_markdown.NODE_PROFILES[actual]
+    if getattr(native_apply, 'PRESERVED_ENGINE_BASE', None) != spec['rules']['commit'] or getattr(native_apply, 'PRESERVED_VALUES_COMPAT_VERSION', None) != 1:
+        raise ValueError(f'指定引擎未安装此版本的受限兼容补丁；未写入。请先审阅 {spec["patch"]}，在副本验证后另行落地引擎补丁')
     return native_apply
 
 
@@ -45,7 +53,7 @@ def plan_subject(repo, subject, baseline, target):
     from finesub.llm.knowledge.node.apply import PRESERVED_VALUE_FIELDS
 
     category = subject.payload['category']
-    before, after, edits = node_compat.preserving_changes(baseline, target, category)
+    before, after, edits = node_compat.preserving_changes(baseline, target, category, engine_profile())
     if fingerprint(repo.entry_text(subject.local_id)) != fingerprint(baseline):
         raise ValueError('原生基础投影已变化，请重新导出合并；不会覆盖知识库')
     nodes = {}
@@ -116,7 +124,7 @@ def apply_release(repo, tasks, *, write=False):
     return {'dry_run': False, 'changed_nodes': changed_ids, 'rev': result.rev, 'operations': len(envelope.ops)}
 
 
-def read_archive(path):
+def read_archive(path, *, expected_profile=None):
     with zipfile.ZipFile(path) as archive:
         members = archive.infolist()
         if len(members) > compat.MAX_FILES or sum(m.file_size for m in members) > compat.MAX_TOTAL:
@@ -125,8 +133,23 @@ def read_archive(path):
         if len(set(n.casefold() for n in names)) != len(names):
             raise ValueError('兼容包有重复路径')
         manifest = json.loads(archive.read('finesub-review-compat.json'))
-        if manifest.get('schema') != 1 or manifest.get('mode') != 'preserve-existing-values' or manifest.get('engine_reference') != 'Yuuu0109/nonoka-sub-x@' + ENGINE_BASE:
+        if not isinstance(manifest, dict) or manifest.get('mode') != 'preserve-existing-values':
             raise ValueError('不支持的兼容包模式')
+        if manifest.get('schema') == 1 and manifest.get('engine_reference') == 'Yuuu0109/nonoka-sub-x@' + ENGINE_BASE:
+            profile = node_markdown.PROFILE  # Historical packages only targeted schema 5.
+        elif manifest.get('schema') == 2:
+            profile = node_markdown.validate_release_profile({key: (1 if key == 'schema' else manifest.get(key))
+                for key in ('schema', 'profile', 'knowledge_schema', 'engine_reference')})
+        else:
+            raise ValueError('不支持的兼容包模式')
+        if 'finesub-review-profile.json' in names:
+            declared = node_markdown.validate_release_profile(json.loads(archive.read('finesub-review-profile.json')))
+            if declared != profile:
+                raise ValueError('发布包和兼容清单的知识库版本不一致')
+        if expected_profile is not None and expected_profile != profile:
+            raise ValueError(f'发布包 {profile} 与引擎 {expected_profile} 不匹配；未写入，不自动迁移')
+        if not isinstance(manifest.get('entries'), list) or not manifest['entries']:
+            raise ValueError('兼容包没有有效条目')
         rows = []
         seen = set()
         for entry in manifest['entries']:

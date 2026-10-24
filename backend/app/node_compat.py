@@ -83,7 +83,7 @@ def value_edit(before, after):
             raise ValueError('不能把旧散文变成新标记或章节')
 
 
-def preserving_changes(baseline, content, category):
+def preserving_changes(baseline, content, category, profile=grammar.PROFILE):
     before, after = projection(baseline), projection(content)
     if before['title'] != after['title']:
         raise ValueError('兼容保存不能重命名主体')
@@ -92,7 +92,7 @@ def preserving_changes(baseline, content, category):
     if len(content.encode('utf-8')) > 1_000_000:
         raise ValueError('FineSub 当前条目内容不能超过 1,000,000 UTF-8 字节')
     changes = []
-    preset = grammar.RULES['categories'][category]
+    preset = grammar.rules_for(profile)['categories'][category]
     declared = {grammar.normalize(s['name']): s for s in preset['sections']}
     for old, new in zip(before['sections'], after['sections']):
         if len(old['lines']) != len(new['lines']):
@@ -110,9 +110,9 @@ def preserving_changes(baseline, content, category):
     return before, after, changes
 
 
-def validate(baseline, content, category):
+def validate(baseline, content, category, profile=grammar.PROFILE):
     try:
-        preserving_changes(baseline, content, category)
+        preserving_changes(baseline, content, category, profile)
     except ValueError as exc:
         return [], [f'旧知识无法可靠兼容保存：{exc}。原内容和草稿仍保留']
     return [NOTICE], []

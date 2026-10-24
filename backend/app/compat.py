@@ -17,7 +17,8 @@ MAX_FILES = 2000
 PROFILES = {
     'legacy-preserve': {'name': '现有 Markdown · 保留分类', 'types': None},
     'finesub-code-v17': {'name': 'FineSub 本地 v17 校验规则', 'types': ['游戏', '梗', '事件', '人物']},
-    node_markdown.PROFILE: {'name': 'FineSub 0.5.1 · 当前节点文本', 'types': None},
+    node_markdown.CURRENT_PROFILE: {'name': 'FineSub 0.6.0 · schema 6', 'types': None},
+    node_markdown.PROFILE: {'name': 'FineSub 0.5.1 · schema 5', 'types': None},
 }
 
 
@@ -180,8 +181,8 @@ def validate(path, content, profile='legacy-preserve', baseline=None):
     safe_path(path)
     if not content.strip():
         errors.append('内容为空')
-    if profile == node_markdown.PROFILE and path.startswith('translation/'):
-        errors.append('FineSub 0.5.1 不再读取旧 translation 纠错文件；保留旧归档请使用 legacy-preserve，当前知识请人工整理到对应条目或 style')
+    if profile in node_markdown.NODE_PROFILES and path.startswith('translation/'):
+        errors.append('FineSub 0.5.1 / 0.6.0 不再读取旧 translation 纠错文件；保留旧归档请使用 legacy-preserve，当前知识请人工整理到对应条目或 style')
         return warnings, errors
     if path.startswith(tuple(category + '/' for category in node_markdown.CATEGORIES)):
         if len(path.split('/')) != 2 or not path.endswith('.md'):
@@ -191,12 +192,13 @@ def validate(path, content, profile='legacy-preserve', baseline=None):
             errors.append('缺少一级标题')
         elif meta['title'] != PurePosixPath(path).stem:
             errors.append('一级标题与文件名不一致')
-        if profile == node_markdown.PROFILE or path.startswith('style/'):
-            w, e = node_markdown.validate(content, path.split('/')[0])
-            if not errors and profile == node_markdown.PROFILE and baseline is not None and path.startswith(('common/', 'streamer/')):
-                _, old_errors = node_markdown.validate(baseline, path.split('/')[0])
+        if profile in node_markdown.NODE_PROFILES or path.startswith('style/'):
+            node_profile = profile if profile in node_markdown.NODE_PROFILES else node_markdown.PROFILE
+            w, e = node_markdown.validate(content, path.split('/')[0], node_profile)
+            if not errors and profile in node_markdown.NODE_PROFILES and baseline is not None and path.startswith(('common/', 'streamer/')):
+                _, old_errors = node_markdown.validate(baseline, path.split('/')[0], profile)
                 if old_errors or node_compat.is_legacy_projection(baseline):
-                    return node_compat.validate(baseline, content, path.split('/')[0])
+                    return node_compat.validate(baseline, content, path.split('/')[0], profile)
             return warnings + w, errors + e
         for section in ('档案', '元数据'):
             if not re.search(r'^##\s+' + section + r'\s*$', content, re.M):
@@ -263,7 +265,7 @@ def index_line(path, content, kind_hint=''):
 
 def build_files(documents, profile, kind_hints=None, baselines=None):
     files, warnings, errors = {}, [], []
-    if profile == node_markdown.PROFILE:
+    if profile in node_markdown.NODE_PROFILES:
         names = {}
         for path in documents:
             if path.startswith(('common/', 'streamer/')):
@@ -295,11 +297,13 @@ def build_files(documents, profile, kind_hints=None, baselines=None):
         files['translation/good-example.md'] = '# 优质翻译示例\n\n' + '\n'.join(examples)
     compatible = sorted(p for p, c in documents.items() if node_compat.NOTICE in validate(p, c, profile, baseline=(baselines or {}).get(p))[0])
     if compatible and not errors:
-        manifest = {'schema': 1, 'engine_reference': 'Yuuu0109/nonoka-sub-x@af32b0145f70a98199b246704076c384bfda95ee',
+        manifest = {**node_markdown.release_profile(profile), 'schema': 2,
                     'mode': 'preserve-existing-values', 'entries': [
                         {'path': path, 'baseline': baselines[path], 'baseline_sha256': digest(baselines[path]),
                          'target_sha256': digest(documents[path])} for path in compatible]}
         files['finesub-review-compat.json'] = json.dumps(manifest, ensure_ascii=False, indent=2)
+    if profile in node_markdown.NODE_PROFILES and not errors:
+        files['finesub-review-profile.json'] = json.dumps(node_markdown.release_profile(profile), ensure_ascii=False, indent=2)
     return files, {'warnings': warnings, 'errors': errors, 'files': len(files), 'profile': profile, 'verification': 'adapter-validation',
                    'compatibility_entries': compatible, 'native_import_requires_compat_tool': bool(compatible)}
 
@@ -343,7 +347,7 @@ def _knowledge_proposals(text, current, profile='legacy-preserve'):
                 raise ValueError('新建词条需要 intro')
             if len(str(p.get('reason', '')).strip()) < 10:
                 raise ValueError('新建词条需要 reason，说明未并入已有词条的原因（至少 10 字）')
-            if profile == node_markdown.PROFILE:
+            if profile in node_markdown.NODE_PROFILES:
                 docs[path] = f'# {entry}\n{p["intro"]}\n\n## 档案\n- [本名] {entry}\n- [别名] {"、".join(p.get("aliases", []))}\n' + (f'- [类型] {p.get("entry_type", "")}\n' if category == 'common' and p.get('entry_type') else '') + '\n## 元数据\n'
             else:
                 docs[path] = f'# {entry}\n{p["intro"]}\n\n## 档案\n本名: {entry}\n别名: {",".join(p.get("aliases", []))}\n' + (f'类型: {p.get("entry_type", "")}\n' if category == 'common' else '') + '\n## 元数据\n'

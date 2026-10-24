@@ -1,6 +1,6 @@
-"""Validate the human Markdown projection of FineSub 0.5.1.
+"""Validate versioned human Markdown projections of FineSub.
 
-The pinned preset data is extracted from Yuuu0109/nonoka-sub-x af32b014.
+The pinned presets come from Yuuu0109/nonoka-sub-x af32b014 and eb642f25.
 This adapter does not open a knowledge database or apply sharing verdicts.
 """
 import json
@@ -10,7 +10,39 @@ from pathlib import Path
 
 RULES = json.loads(Path(__file__).with_name('node_presets.json').read_text(encoding='utf-8'))
 PROFILE = 'finesub-0.5.1'
+CURRENT_PROFILE = 'finesub-0.6.0'
+CURRENT_RULES = json.loads(Path(__file__).with_name('node_presets_0_6.json').read_text(encoding='utf-8'))
+NODE_PROFILES = {
+    PROFILE: {'schema': 5, 'rules': RULES, 'patch': 'engine-preserved-values.patch'},
+    CURRENT_PROFILE: {'schema': 6, 'rules': CURRENT_RULES, 'patch': 'engine-preserved-values-0.6.0.patch'},
+}
 CATEGORIES = ('common', 'streamer', 'style')
+
+
+def rules_for(profile):
+    return NODE_PROFILES[profile]['rules']
+
+
+def profile_for_schema(schema):
+    for profile, spec in NODE_PROFILES.items():
+        if spec['schema'] == schema:
+            return profile
+    raise ValueError(f'不支持的原生 schema {schema}；仅支持 schema 5、6，不自动迁移')
+
+
+def release_profile(profile):
+    rules = rules_for(profile)
+    return {'schema': 1, 'profile': profile, 'knowledge_schema': NODE_PROFILES[profile]['schema'],
+            'engine_reference': rules['repository'] + '@' + rules['commit']}
+
+
+def validate_release_profile(metadata):
+    if not isinstance(metadata, dict) or metadata.get('profile') not in NODE_PROFILES:
+        raise ValueError('不支持的发布包知识库版本')
+    profile = metadata['profile']
+    if metadata != release_profile(profile):
+        raise ValueError('发布包的规则、引擎来源或知识库版本不一致')
+    return profile
 
 
 def clean_lines(content):
@@ -104,7 +136,7 @@ def match_key(value):
     return unicodedata.normalize('NFKC', value.strip()).casefold()
 
 
-def validate(content, category):
+def validate(content, category, profile=PROFILE):
     errors, warnings = [], []
     if len(content.encode('utf-8')) > 1_000_000:
         errors.append('FineSub 当前条目内容不能超过 1,000,000 UTF-8 字节')
@@ -123,7 +155,7 @@ def validate(content, category):
         parsed = sections(content)
     except ValueError as exc:
         return [], [str(exc)]
-    preset = RULES['categories'][category]
+    preset = rules_for(profile)['categories'][category]
     declared = {normalize(s['name']): s for s in preset['sections']}
     seen, section_labels = set(), {}
     for section in parsed:
@@ -133,6 +165,13 @@ def validate(content, category):
             errors.append(f'章节重复：{name}')
         seen.add(normalized)
         if name == '元数据':
+            allowed = {'最近更新日期'}
+            if profile == CURRENT_PROFILE:
+                allowed.add('重分类理由')
+            for number, body in section['lines']:
+                field = re.match(r'^([^:：]+)[:：]', body)
+                if not field or field[1].strip() not in allowed:
+                    errors.append(f'「元数据」第 {number} 行：不支持的元数据字段')
             continue
         spec = declared.get(normalized) or preset.get('default_section')
         if spec is None:
