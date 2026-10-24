@@ -48,6 +48,11 @@ def current_revisions(db):
     return db.scalars(select(Revision).join(Entry, Entry.current_revision == Revision.id)).all()
 
 
+def published_revision_ids(db):
+    # Published deletions are absent from snapshots but still satisfy their group.
+    return set(db.scalars(select(Entry.published_revision).where(Entry.published_revision.is_not(None))).all())
+
+
 def revision_view(revision):
     return {key: getattr(revision, key) for key in ('id', 'entry_id', 'parent_id', 'base_published', 'batch_id', 'number', 'path', 'group_id', 'title', 'category', 'kind', 'aliases', 'summary', 'source', 'operation', 'status', 'author_id', 'created_at', 'digest')}
 
@@ -153,8 +158,39 @@ def decide(db, entry_id, revision_id, status, reason, user):
     recipients = db.scalars(select(Review.author_id).where(Review.revision_id == revision.id)).all()
     labels = {'approved': '通过', 'rejected': '驳回', 'needs_changes': '待补充', 'pending': '重新审核'}
     notify(db, [*recipients, entry.assignee_id], f'管理员将「{revision.title}」决定为：{labels[status]}', entry.id, user.id)
-    audit(db, user, 'review.decide', revision.id, status=status, reason=reason)
+    audit(db, user, 'review.decide', revision.id, status=status, reason=reason[:500])
     return revision_view(revision)
+
+
+def publication_candidates(db):
+    """Explain existing publication constraints before the user starts a job."""
+    revisions = current_revisions(db)
+    entries = {e.id: e for e in db.scalars(select(Entry)).all()}
+    base = snapshot(db)
+    published = published_revision_ids(db)
+    profile = db.get(Workspace, 1).profile
+    candidates = [r for r in revisions if r.status == 'approved' and entries[r.entry_id].published_revision != r.id]
+    blockers = {}
+    for rev in candidates:
+        reasons = []
+        if base.get(rev.entry_id) != rev.base_published:
+            reasons.append('正式版本已变化，需重新修订和审核')
+        if rev.operation != 'delete':
+            _, errors = compat.validate(rev.path, rev.content, profile, baseline=compatibility_baseline(db, rev))
+            reasons.extend(errors)
+        blockers[rev.id] = reasons
+    result = []
+    for rev in candidates:
+        reasons = list(blockers[rev.id])
+        related = [r for r in revisions if rev.group_id and r.group_id == rev.group_id and r.id not in published]
+        for other in related:
+            if other.status != 'approved':
+                reasons.append(f'关联词条「{other.title}」尚未通过')
+            elif other.id != rev.id and blockers.get(other.id):
+                reasons.append(f'关联词条「{other.title}」需先解决发布问题')
+        result.append({**revision_view(rev), 'blockers': reasons, 'published': False,
+                       'related': [revision_view(r) for r in related if r.id != rev.id]})
+    return result
 
 
 def prepare_release(db, user, name, notes, revision_ids=None, rollback_id=None):
@@ -172,6 +208,7 @@ def prepare_release(db, user, name, notes, revision_ids=None, rollback_id=None):
         if not selected:
             raise HTTPException(422, '请选择通过裁决且未发布的版本')
         target = dict(base)
+        published = published_revision_ids(db)
         revisions = db.scalars(select(Revision).where(Revision.id.in_(selected))).all()
         if len(revisions) != len(selected):
             raise HTTPException(422, '包含无效版本')
@@ -185,7 +222,7 @@ def prepare_release(db, user, name, notes, revision_ids=None, rollback_id=None):
                 raise HTTPException(409, f'「{rev.title}」的发布基线已变化，请重新修订和审核')
             if rev.group_id:
                 related = db.scalars(select(Revision.id).join(Entry, Entry.current_revision == Revision.id).where(Revision.group_id == rev.group_id)).all()
-                if not set(related).issubset(selected | set(base.values())):
+                if not set(related).issubset(selected | published):
                     raise HTTPException(409, '关联变更组必须全部通过并一起发布')
             if rev.operation == 'delete':
                 target.pop(entry.id, None)

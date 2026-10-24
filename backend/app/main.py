@@ -15,11 +15,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, delete, func, or_, select, text, update
+from sqlalchemy.orm import load_only
 
 from . import compat
 from .db import AccessGate, AccessSession, Asset, Audit, Batch, Decision, Entry, ImportItem, Job, LoginSession, Notice, Release, Review, Revision, User, Workspace, init_db, now
 from .security import access_session, admin, current_user, db_session, hash_password, token_hash, user_view, verify_password
-from .services import admins, audit, compatibility_baseline, confirm_batch, current_revisions, decide, new_revision, notify, prepare_release, require, revision_view, snapshot, workspace_lock
+from .services import admins, audit, compatibility_baseline, confirm_batch, current_revisions, decide, new_revision, notify, prepare_release, publication_candidates, require, revision_view, snapshot, workspace_lock
 
 
 @asynccontextmanager
@@ -31,22 +32,25 @@ async def lifespan(app):
 app = FastAPI(title='FineSub 知识库审核', version='0.1.0', lifespan=lifespan, docs_url=None, redoc_url=None)
 
 
-@app.middleware('http')
-async def security_headers(request, call_next):
-    if request.method in ('POST', 'PUT', 'PATCH'):
-        length = request.headers.get('content-length')
-        if length is None:
-            return Response('Content-Length required', status_code=411)
-        if not length.isdigit() or int(length) > (32 * 1024 * 1024 if request.url.path == '/api/imports' else 3 * 1024 * 1024):
-            return Response('Request body too large', status_code=413)
-    response = await call_next(request)
+def security_headers(response, path):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['Referrer-Policy'] = 'same-origin'
     response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
-    if request.url.path.startswith('/api/'):
+    if path.startswith('/api/'):
         response.headers['Cache-Control'] = 'no-store'
     return response
+
+
+@app.middleware('http')
+async def security_headers_middleware(request, call_next):
+    if request.method in ('POST', 'PUT', 'PATCH'):
+        length = request.headers.get('content-length')
+        if length is None:
+            return security_headers(Response('Content-Length required', status_code=411), request.url.path)
+        if not length.isdigit() or int(length) > (32 * 1024 * 1024 if request.url.path == '/api/imports' else 3 * 1024 * 1024):
+            return security_headers(Response('Request body too large', status_code=413), request.url.path)
+    return security_headers(await call_next(request), request.url.path)
 
 
 class Payload(BaseModel):
@@ -156,11 +160,13 @@ def enter(body: Enter, request: Request, response: Response, db=Depends(db_sessi
     if not gate:
         raise HTTPException(503, '访问口令尚未设置，请联系管理员')
     identity = token_hash('access:' + (request.client.host if request.client else ''))
-    recent = db.scalars(select(Audit).where(Audit.action == 'access.failure', Audit.target_id == identity)
-                        .order_by(Audit.created_at.desc()).limit(10)).all()
-    if len([a for a in recent if a.detail.get('time', 0) > time.time() - 900]) >= 10:
-        raise HTTPException(429, '口令尝试过多，请 15 分钟后重试')
     if not verify_password(body.passphrase, gate.passphrase_hash):
+        # Throttle failures only: a correct passphrase must never be locked out
+        # by somebody else's guesses from the same address.
+        recent = db.scalars(select(Audit).where(Audit.action == 'access.failure', Audit.target_id == identity)
+                            .order_by(Audit.created_at.desc()).limit(10)).all()
+        if len([a for a in recent if a.detail.get('time', 0) > time.time() - 900]) >= 10:
+            raise HTTPException(429, '口令尝试过多，请 15 分钟后重试')
         db.add(Audit(action='access.failure', target_id=identity, detail={'time': time.time()}))
         db.commit()
         raise HTTPException(401, '访问口令不正确')
@@ -187,13 +193,15 @@ def enter(body: Enter, request: Request, response: Response, db=Depends(db_sessi
 @app.post('/api/auth/login')
 def login(body: Login, request: Request, response: Response, member=Depends(current_user, scope='function'), db=Depends(db_session, scope='function')):
     # DB-backed throttle survives restarts and applies to all API workers.
-    identity = token_hash((request.client.host if request.client else '') + ':' + body.username.lower())
-    cutoff = time.time() - 900
-    recent = db.scalars(select(Audit).where(Audit.action == 'auth.failure', Audit.target_id == identity).order_by(Audit.created_at.desc()).limit(10)).all()
-    if len([a for a in recent if a.detail.get('time', 0) > cutoff]) >= 10:
-        raise HTTPException(429, '登录尝试过多，请 15 分钟后重试')
+    # Only failed attempts count, and the key is the address: an attacker cannot
+    # lock an admin out by guessing that admin's username.
+    identity = token_hash('auth:' + (request.client.host if request.client else ''))
     user = db.scalar(select(User).where(User.username == body.username.lower()))
     if not user or not user.password or not verify_password(body.password, user.password) or not user.active or user.role != 'admin':
+        cutoff = time.time() - 900
+        recent = db.scalars(select(Audit).where(Audit.action == 'auth.failure', Audit.target_id == identity).order_by(Audit.created_at.desc()).limit(10)).all()
+        if len([a for a in recent if a.detail.get('time', 0) > cutoff]) >= 10:
+            raise HTTPException(429, '登录尝试过多，请 15 分钟后重试')
         db.add(Audit(action='auth.failure', target_id=identity, detail={'time': time.time()}))
         db.commit()
         raise HTTPException(401, '管理员账号或密码错误，或账号已停用')
@@ -422,7 +430,7 @@ def add_review(entry_id: str, body: ReviewPayload, user=Depends(current_user, sc
 def resolve_review(review_id: str, body: ResolutionPayload, user=Depends(admin, scope='function'), db=Depends(db_session, scope='function')):
     record = require(db, Review, review_id)
     record.resolution, record.resolution_note = body.resolution, body.note
-    revision = db.get(Revision, record.revision_id)
+    revision = require(db, Revision, record.revision_id)
     notify(db, [record.author_id], f'管理员已处理你对「{revision.title}」的意见', revision.entry_id, user.id)
     audit(db, user, 'review.resolve', record.id, **body.model_dump())
     return {'ok': True}
@@ -509,7 +517,7 @@ def batch_detail(batch_id: str, user=Depends(current_user, scope='function'), db
     return {'id': batch.id, 'name': batch.name, 'source': batch.source, 'status': batch.status, 'warnings': batch.warnings,
             'job': {'id': job.id, 'status': job.status, 'error': job.error} if job else None,
             'items': [{k: getattr(i, k) for k in ('id', 'path', 'classification', 'warnings', 'error', 'grouped', 'operation', 'base_revision')} for i in items],
-            'assets': [{'id': a.id, 'filename': a.filename, 'digest': a.digest} for a in db.scalars(select(Asset).where(Asset.batch_id == batch.id)).all()]}
+            'assets': [{'id': a.id, 'filename': a.filename, 'digest': a.digest} for a in db.execute(select(Asset.id, Asset.filename, Asset.digest).where(Asset.batch_id == batch.id)).all()]}
 
 
 @app.get('/api/import-items/{item_id}')
@@ -547,11 +555,18 @@ def retry(job_id: str, user=Depends(admin, scope='function'), db=Depends(db_sess
 
 @app.get('/api/releases')
 def releases(user=Depends(current_user, scope='function'), db=Depends(db_session, scope='function')):
-    rows = db.scalars(select(Release).order_by(Release.created_at.desc()).limit(100)).all()
+    rows = db.scalars(select(Release).options(load_only(Release.id, Release.name, Release.notes, Release.status, Release.created_at,
+                                                      Release.snapshot, Release.report, Release.rollback_of))
+                      .order_by(Release.created_at.desc()).limit(100)).all()
     ws = db.get(Workspace, 1)
     return [{'id': r.id, 'name': r.name, 'notes': r.notes, 'status': r.status, 'created_at': r.created_at,
              'count': len(r.snapshot), 'report': r.report, 'rollback_of': r.rollback_of, 'current': r.id == ws.latest_release,
              'job_id': db.scalar(select(Job.id).where(Job.target_id == r.id))} for r in rows]
+
+
+@app.get('/api/releases/candidates')
+def release_candidates(user=Depends(admin, scope='function'), db=Depends(db_session, scope='function')):
+    return publication_candidates(db)
 
 
 @app.post('/api/releases')

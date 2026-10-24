@@ -8,7 +8,7 @@ from sqlalchemy import delete, select, update
 
 from . import compat
 from .db import Asset, Audit, Batch, Decision, Entry, ImportItem, Job, Release, Review, Revision, Session, Workspace, init_db, now
-from .services import admins, current_revisions, export_baseline, notify, workspace_lock
+from .services import admins, current_revisions, export_baseline, notify, published_revision_ids, workspace_lock
 
 log = logging.getLogger('finesub-review.worker')
 
@@ -78,10 +78,15 @@ def publish(db, release):
     if ws.latest_release != release.parent_id:
         raise ValueError('发布基线已经变化，请重新创建发布')
     if not release.rollback_of:
+        satisfied = set(release.changes) | published_revision_ids(db)
         for rid in release.changes:
             rev = db.get(Revision, rid)
             if not rev or rev.status != 'approved' or db.get(Entry, rev.entry_id).current_revision != rid:
                 raise ValueError('选中的内容已修订或裁决已变化，请重新创建发布任务')
+            if rev.group_id:
+                related = db.scalars(select(Revision.id).join(Entry, Entry.current_revision == Revision.id).where(Revision.group_id == rev.group_id)).all()
+                if not set(related).issubset(satisfied):
+                    raise ValueError('关联变更组在排队期间已变化，请重新审核并创建发布任务')
     revisions = [db.get(Revision, rid) for rid in release.snapshot.values()]
     if any(r is None for r in revisions):
         raise ValueError('发布快照中存在无效版本')
@@ -119,16 +124,21 @@ def publish(db, release):
     notify(db, admins(db), f'「{release.name}」已发布，可下载知识库包')
 
 
-def run_once():
+def run_once(job_id=None):
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
     with Session.begin() as db:
         db.execute(update(Job).where(Job.status == 'processing', Job.touched_at < cutoff).values(status='queued'))
-        job_id = db.scalar(select(Job.id).where(Job.status == 'queued').order_by(Job.created_at).limit(1))
+        if job_id:
+            job_id = db.scalar(select(Job.id).where(Job.id == job_id, Job.status == 'queued'))
+        else:
+            job_id = db.scalar(select(Job.id).where(Job.status == 'queued').order_by(Job.created_at).limit(1))
         if not job_id:
             return False
         claimed = db.execute(update(Job).where(Job.id == job_id, Job.status == 'queued').values(status='processing', touched_at=now(), attempts=Job.attempts + 1)).rowcount
         if not claimed:
-            return True
+            # Another worker won the claim; this call did no work. Callers that
+            # name a job must poll its status instead of assuming it ran.
+            return False
         claimed_job = db.get(Job, job_id)
         target = db.get(Batch if claimed_job.kind == 'import' else Release, claimed_job.target_id)
         if target:

@@ -23,10 +23,22 @@ def test_wrong_passphrase_is_rate_limited_without_creating_members():
     c = TestClient(app)
     for _ in range(10):
         assert c.post('/api/auth/enter', json={'passphrase': 'incorrect'}).status_code == 401
-    assert c.post('/api/auth/enter', json={'passphrase': PASSPHRASE}).status_code == 429
+    assert c.post('/api/auth/enter', json={'passphrase': 'incorrect'}).status_code == 429
     assert not c.cookies.get('review_access')
     with Session() as db:
         assert not db.scalar(select(User.id).where(User.password == ''))
+    # Failures are throttled, but another address/user cannot lock the correct
+    # passphrase out: verification runs before the failure counter is consulted.
+    assert c.post('/api/auth/enter', json={'passphrase': PASSPHRASE}).status_code == 200
+
+
+def test_login_throttle_counts_failures_without_locking_out_the_right_password():
+    m = client('member')
+    for _ in range(10):
+        assert m.post('/api/auth/login', json={'username': 'admin', 'password': 'incorrect'}).status_code == 401
+    assert m.post('/api/auth/login', json={'username': 'admin', 'password': 'incorrect'}).status_code == 429
+    result = m.post('/api/auth/login', json={'username': 'admin', 'password': PASSWORD})
+    assert result.status_code == 200 and result.json()['user']['role'] == 'admin'
 
 
 def test_unconfigured_gate_fails_closed():

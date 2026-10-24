@@ -60,3 +60,76 @@ def test_diff_can_compare_to_published_instead_of_previous_revision():
     assert '+- 第二版新增依据。' in formal['diff']
     assert formal['entry']['id'] == third['id']
     assert a.get(path + '?compare_to=unknown').status_code == 422
+
+
+def test_release_candidates_explain_group_blockers_without_publishing():
+    a, m = client(), client('member')
+    upload(a, {'common/甲.md': document('甲'), 'common/乙.md': document('乙')})
+    items = a.get('/api/entries').json()['items']
+    with Session.begin() as db:
+        for rev in db.scalars(select(Revision)).all():
+            rev.group_id = 'linked-proposal'
+    approve(a, items[0])
+    blocked = a.get('/api/releases/candidates').json()
+    assert len(blocked) == 1 and any('尚未通过' in e for e in blocked[0]['blockers'])
+    assert blocked[0]['related'][0]['id'] == items[1]['id']
+    assert len(a.get('/api/entries?group_id=linked-proposal').json()['items']) == 2
+    assert a.get('/api/entries/' + items[0]['entry_id']).json()['related'][0]['id'] == items[1]['id']
+    assert m.get('/api/releases/candidates').status_code == 403
+    assert a.get('/api/releases').json() == []
+    approve(a, items[1])
+    ready = a.get('/api/releases/candidates').json()
+    assert len(ready) == 2 and not any(r['blockers'] for r in ready)
+    # Readiness never bypasses the existing atomic group check at publication.
+    assert a.post('/api/releases', json={'name': '不完整', 'revision_ids': [items[0]['id']]}).status_code == 409
+    publish(a, items)
+    assert a.get('/api/releases/candidates').json() == []
+
+
+def test_published_group_deletion_does_not_block_later_survivor_revision():
+    a = client()
+    upload(a, {'common/甲.md': document('甲'), 'common/乙.md': document('乙')})
+    items = a.get('/api/entries').json()['items']
+    with Session.begin() as db:
+        for rev in db.scalars(select(Revision)).all():
+            rev.group_id = 'linked-proposal'
+    for item in items:
+        approve(a, item)
+    publish(a, items)
+    deleted = a.post('/api/entries/' + items[1]['entry_id'] + '/revisions', json={
+        'base_revision': items[1]['id'], 'content': '', 'operation': 'delete'}).json()
+    approve(a, deleted)
+    publish(a, [deleted])
+    survivor = a.post('/api/entries/' + items[0]['entry_id'] + '/revisions', json={
+        'base_revision': items[0]['id'], 'content': document(items[0]['title'], extra='- 新的依据。')}).json()
+    approve(a, survivor)
+    candidates = a.get('/api/releases/candidates').json()
+    assert len(candidates) == 1 and candidates[0]['blockers'] == []
+    assert candidates[0]['related'] == []
+    release_id = publish(a, [survivor])
+    release = next(r for r in a.get('/api/releases').json() if r['id'] == release_id)
+    assert release['status'] == 'ready' and release['count'] == 1
+
+
+def test_worker_rechecks_group_if_already_published_peer_changes_while_queued():
+    a = client()
+    upload(a, {'common/甲.md': document('甲'), 'common/乙.md': document('乙')})
+    items = a.get('/api/entries').json()['items']
+    with Session.begin() as db:
+        for rev in db.scalars(select(Revision)).all():
+            rev.group_id = 'linked-proposal'
+    for item in items:
+        approve(a, item)
+    publish(a, items)
+    first = a.post('/api/entries/' + items[0]['entry_id'] + '/revisions', json={
+        'base_revision': items[0]['id'], 'content': document(items[0]['title'], extra='- 新的依据。')}).json()
+    approve(a, first)
+    queued = publish(a, [first], run=False)
+    response = a.post('/api/entries/' + items[1]['entry_id'] + '/revisions', json={
+        'base_revision': items[1]['id'], 'content': document(items[1]['title'], extra='- 待审核的关联变更。')})
+    assert response.status_code == 200
+    assert run_once()
+    release = next(r for r in a.get('/api/releases').json() if r['id'] == queued)
+    assert release['status'] == 'failed'
+    assert '关联变更组' in release['report']['errors'][0]
+    assert not release['current']

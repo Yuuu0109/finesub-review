@@ -1,4 +1,8 @@
 services:
+  app:
+    environment:
+      # HTTPS 部署下会话 Cookie 必须带 Secure。
+      COOKIE_SECURE: "true"
   caddy:
     image: caddy:2
     restart: unless-stopped

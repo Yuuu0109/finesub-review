@@ -2,6 +2,7 @@ import argparse
 import getpass
 import os
 import secrets
+import time
 from pathlib import Path
 
 from sqlalchemy import delete, select
@@ -11,6 +12,19 @@ from .db import AccessGate, AccessSession, Asset, Batch, DATA, Job, Session, Use
 from .security import hash_password
 from .services import confirm_batch
 from .worker import run_once
+
+
+def wait_for_job(job_id, timeout=600):
+    """Wait until a claimed job reaches a terminal state; None if it never does."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with Session() as db:
+            job = db.get(Job, job_id)
+            status = job.status if job else None
+        if status in ('done', 'failed'):
+            return status
+        time.sleep(1)
+    return None
 
 
 def main():
@@ -33,6 +47,8 @@ def main():
             if db.scalar(select(User.id).where(User.role == 'admin')):
                 raise SystemExit('已有账号，请使用管理员页面管理用户')
             password = secrets.token_urlsafe(18) if args.generate else getpass.getpass('管理员密码（至少 10 位）: ')
+            if len(password) < 10:
+                raise SystemExit('管理员密码至少 10 位')
             db.add(User(username=args.username.lower(), name=args.name, password=hash_password(password), role='admin'))
             if args.generate:
                 DATA.mkdir(parents=True, exist_ok=True)
@@ -42,6 +58,8 @@ def main():
         print('管理员已创建')
     elif args.command == 'set-passphrase':
         passphrase = secrets.token_urlsafe(18) if args.generate else getpass.getpass('访问口令（至少 10 位）: ')
+        if len(passphrase) < 10:
+            raise SystemExit('访问口令至少 10 位')
         hashed = hash_password(passphrase)
         with Session.begin() as db:
             gate = db.get(AccessGate, 1)
@@ -68,9 +86,16 @@ def main():
             db.flush()
             batch_id, user_id = batch.id, user.id
             db.add(Asset(batch_id=batch.id, filename='knowledge.zip', data=data, digest=compat.digest(data)))
-            db.add(Job(kind='import', target_id=batch.id))
-        while run_once():
-            pass
+            job = Job(kind='import', target_id=batch.id)
+            db.add(job)
+            db.flush()
+            job_id = job.id
+        # Run only this import; a queued release from another process must not
+        # be consumed by the CLI. run_once returns False when another worker won
+        # the claim, which is not a failure: wait for that worker's result.
+        run_once(job_id)
+        if wait_for_job(job_id) is None:
+            raise SystemExit('导入任务由其他后台进程接管，仍未结束；请稍后查看任务状态')
         from .db import ImportItem
         with Session.begin() as db:
             batch = db.get(Batch, batch_id)
