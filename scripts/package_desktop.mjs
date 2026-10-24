@@ -11,8 +11,11 @@ if (pkg.version !== version || cargo.match(/^version = "([^"]+)"/m)?.[1] !== ver
   throw new Error('Package, Cargo and Tauri versions must match');
 const out = join(root, 'output', `desktop-${version}`);
 const changelog = await readFile(join(root, 'CHANGELOG.md'), 'utf8');
-const heading = `## 桌面版 ${version} —`;
-if (!changelog.includes(heading)) throw new Error('Version has no changelog entry');
+// Accept both `## 桌面版 1.2.3 —` and `## 1.2.3 —`: sections covering more than
+// the desktop app use the bare form, and release notes must not depend on which.
+const headingMatch = changelog.match(new RegExp(`^## (?:桌面版 )?${version.replace(/\./g, '\\.')} —`, 'm'));
+const heading = headingMatch?.[0];
+if (!heading) throw new Error('Version has no changelog entry');
 const notes = changelog.split(heading)[1].split('\n').slice(1).join('\n').split('\n## ')[0].trim();
 const portableSource = join(root, 'frontend/src-tauri/target/release/finesub-review-desktop.exe');
 const portableName = `finesub-review-${version}-windows-x64-portable.exe`;
